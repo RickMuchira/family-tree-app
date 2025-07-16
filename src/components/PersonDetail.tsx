@@ -11,7 +11,9 @@ import {
   Users, 
   Heart,
   Baby,
-  UserCheck
+  UserCheck,
+  Clock,
+  CalendarDays
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -67,17 +69,79 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
     return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
   };
 
-  const getAgeDisplay = (birthYear?: number, deathYear?: number) => {
-    if (!birthYear) return null;
-    
-    if (deathYear) {
-      const age = deathYear - birthYear;
-      return `${age} years (${birthYear}-${deathYear})`;
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return null;
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+    } catch {
+      return dateString;
     }
-    
-    const currentYear = new Date().getFullYear();
-    const age = currentYear - birthYear;
-    return `${age} years old (born ${birthYear})`;
+  };
+
+  const getDetailedAgeInfo = () => {
+    const birthInfo = {
+      hasExactDate: !!person.dateOfBirth,
+      date: person.dateOfBirth ? new Date(person.dateOfBirth) : null,
+      year: person.birthYear,
+      display: person.dateOfBirth ? formatDate(person.dateOfBirth) : person.birthYear?.toString()
+    };
+
+    const deathInfo = {
+      hasExactDate: !!person.dateOfDeath,
+      date: person.dateOfDeath ? new Date(person.dateOfDeath) : null,
+      year: person.deathYear,
+      display: person.dateOfDeath ? formatDate(person.dateOfDeath) : person.deathYear?.toString()
+    };
+
+    const isDeceased = !!(person.dateOfDeath || person.deathYear);
+
+    let ageInfo = {
+      current: null as number | null,
+      atDeath: null as number | null,
+      display: '' as string
+    };
+
+    if (birthInfo.date || birthInfo.year) {
+      const birthYear = birthInfo.date ? birthInfo.date.getFullYear() : birthInfo.year!;
+      const currentYear = new Date().getFullYear();
+      
+      if (isDeceased) {
+        const deathYear = deathInfo.date ? deathInfo.date.getFullYear() : deathInfo.year!;
+        ageInfo.atDeath = deathYear - birthYear;
+        
+        if (birthInfo.date && deathInfo.date) {
+          // Calculate exact age
+          let age = deathInfo.date.getFullYear() - birthInfo.date.getFullYear();
+          if (deathInfo.date < new Date(birthInfo.date.setFullYear(deathInfo.date.getFullYear()))) {
+            age--;
+          }
+          ageInfo.atDeath = age;
+        }
+        
+        ageInfo.display = `Died at ${ageInfo.atDeath} years old`;
+      } else {
+        ageInfo.current = currentYear - birthYear;
+        
+        if (birthInfo.date) {
+          // Calculate exact current age
+          const today = new Date();
+          let age = today.getFullYear() - birthInfo.date.getFullYear();
+          if (today < new Date(birthInfo.date.setFullYear(today.getFullYear()))) {
+            age--;
+          }
+          ageInfo.current = age;
+        }
+        
+        ageInfo.display = `${ageInfo.current} years old`;
+      }
+    }
+
+    return { birthInfo, deathInfo, ageInfo, isDeceased };
   };
 
   const getAllChildren = () => {
@@ -95,6 +159,7 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
   };
 
   const allChildren = getAllChildren();
+  const { birthInfo, deathInfo, ageInfo, isDeceased } = getDetailedAgeInfo();
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -131,16 +196,16 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
                   <Badge variant="outline" className="capitalize">
                     {person.gender.toLowerCase()}
                   </Badge>
-                  {person.deathYear && (
+                  {isDeceased && (
                     <Badge variant="secondary">Deceased</Badge>
                   )}
                 </div>
 
                 <div className="mt-3 space-y-2 text-sm text-gray-600">
-                  {getAgeDisplay(person.birthYear, person.deathYear) && (
+                  {ageInfo.display && (
                     <div className="flex items-center">
-                      <Calendar className="h-4 w-4 mr-2" />
-                      {getAgeDisplay(person.birthYear, person.deathYear)}
+                      <Clock className="h-4 w-4 mr-2" />
+                      {ageInfo.display}
                     </div>
                   )}
                   
@@ -155,6 +220,65 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
             </div>
           </CardContent>
         </Card>
+
+        {/* Detailed Date Information */}
+        {(birthInfo.display || deathInfo.display) && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center text-sm font-medium">
+                <CalendarDays className="h-4 w-4 mr-2" />
+                Life Timeline
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {birthInfo.display && (
+                <div className="flex items-start space-x-3">
+                  <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                    <Calendar className="h-4 w-4 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm text-green-700">Born</p>
+                    <p className="text-sm text-gray-900">{birthInfo.display}</p>
+                    {birthInfo.hasExactDate && birthInfo.year && (
+                      <p className="text-xs text-gray-500">Year: {birthInfo.year}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {deathInfo.display && (
+                <div className="flex items-start space-x-3">
+                  <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                    <Calendar className="h-4 w-4 text-gray-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-sm text-gray-700">Died</p>
+                    <p className="text-sm text-gray-900">{deathInfo.display}</p>
+                    {deathInfo.hasExactDate && deathInfo.year && (
+                      <p className="text-xs text-gray-500">Year: {deathInfo.year}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {ageInfo.current !== null && (
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-blue-800">
+                    Currently {ageInfo.current} years old
+                  </p>
+                </div>
+              )}
+
+              {ageInfo.atDeath !== null && (
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-sm text-gray-700">
+                    Lived {ageInfo.atDeath} years
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Family Relationships */}
         <div className="space-y-4">
@@ -268,7 +392,7 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
           )}
         </div>
 
-        {/* Quick Stats */}
+        {/* Enhanced Family Summary */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center text-sm font-medium">
@@ -277,35 +401,54 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-4 text-center">
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-lg font-semibold text-gray-900">
-                  {(person.father || person.mother) ? '✓' : '✗'}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-3 bg-gray-50 rounded-lg text-center">
+                <div className="flex items-center justify-center mb-1">
+                  <Users className="h-4 w-4 text-gray-600" />
+                </div>
+                <p className="text-sm font-medium text-gray-900">
+                  {(person.father || person.mother) ? 'Yes' : 'No'}
                 </p>
                 <p className="text-xs text-gray-500">Has Parents</p>
               </div>
               
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-lg font-semibold text-gray-900">
-                  {person.spouse ? '✓' : '✗'}
+              <div className="p-3 bg-gray-50 rounded-lg text-center">
+                <div className="flex items-center justify-center mb-1">
+                  <Heart className="h-4 w-4 text-gray-600" />
+                </div>
+                <p className="text-sm font-medium text-gray-900">
+                  {person.spouse ? 'Yes' : 'No'}
                 </p>
                 <p className="text-xs text-gray-500">Married</p>
               </div>
               
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-lg font-semibold text-gray-900">
+              <div className="p-3 bg-gray-50 rounded-lg text-center">
+                <div className="flex items-center justify-center mb-1">
+                  <Baby className="h-4 w-4 text-gray-600" />
+                </div>
+                <p className="text-sm font-medium text-gray-900">
                   {allChildren.length}
                 </p>
                 <p className="text-xs text-gray-500">Children</p>
               </div>
               
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-lg font-semibold text-gray-900">
-                  {person.deathYear ? 'No' : 'Yes'}
+              <div className="p-3 bg-gray-50 rounded-lg text-center">
+                <div className="flex items-center justify-center mb-1">
+                  <Clock className="h-4 w-4 text-gray-600" />
+                </div>
+                <p className="text-sm font-medium text-gray-900">
+                  {isDeceased ? 'No' : 'Yes'}
                 </p>
                 <p className="text-xs text-gray-500">Living</p>
               </div>
             </div>
+            
+            {ageInfo.display && (
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg text-center">
+                <p className="text-sm font-medium text-blue-900">{ageInfo.display}</p>
+                <p className="text-xs text-blue-600">Age Information</p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

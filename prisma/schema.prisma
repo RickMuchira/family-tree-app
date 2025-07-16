@@ -4,6 +4,9 @@
 // Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,13 +17,14 @@ datasource db {
 }
 
 model Person {
-  dateOfBirth  String? // ISO date string
   id          String    @id @default(cuid())
   firstName   String
   lastName    String
   gender      Gender    @default(UNKNOWN)
   birthYear   Int?
   deathYear   Int?
+  dateOfBirth String?   // ISO date string
+  dateOfDeath String?   // ISO date string
   location    String?
   avatarColor String    @default("#6B7280")
   

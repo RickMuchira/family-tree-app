@@ -8,13 +8,42 @@ const PersonSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   gender: z.enum(['MALE', 'FEMALE', 'UNKNOWN']).default('UNKNOWN'),
-  birthYear: z.number().optional(),
-  deathYear: z.number().optional(),
+  birthYear: z.number().min(1900).max(new Date().getFullYear()).optional(),
+  deathYear: z.number().min(1900).max(new Date().getFullYear()).optional(),
+  dateOfBirth: z.string().optional(),
+  dateOfDeath: z.string().optional(),
   location: z.string().optional(),
   fatherId: z.string().optional(),
   motherId: z.string().optional(),
   spouseId: z.string().optional(),
-});
+}).refine(
+  (data) => {
+    if (
+      typeof data.birthYear === 'number' &&
+      typeof data.deathYear === 'number'
+    ) {
+      return data.deathYear >= data.birthYear;
+    }
+    return true;
+  },
+  {
+    message: 'Year of death must be equal to or greater than year of birth',
+    path: ['deathYear'],
+  }
+).refine(
+  (data) => {
+    if (data.dateOfBirth && data.dateOfDeath) {
+      const birthDate = new Date(data.dateOfBirth);
+      const deathDate = new Date(data.dateOfDeath);
+      return deathDate >= birthDate;
+    }
+    return true;
+  },
+  {
+    message: 'Date of death must be equal to or after date of birth',
+    path: ['dateOfDeath'],
+  }
+);
 
 // GET all persons
 export async function GET() {
@@ -32,6 +61,7 @@ export async function GET() {
     
     return NextResponse.json(persons);
   } catch (error) {
+    console.error('Error fetching persons:', error);
     return NextResponse.json({ error: 'Failed to fetch persons' }, { status: 500 });
   }
 }
@@ -42,7 +72,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const validatedData = PersonSchema.parse(body);
     
-    // Generate avatar color based on gender
     const avatarColor = validatedData.gender === 'MALE' ? '#3B82F6' : 
                        validatedData.gender === 'FEMALE' ? '#EC4899' : '#6B7280';
     
@@ -60,6 +89,7 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json(person, { status: 201 });
   } catch (error) {
+    console.error('Error creating person:', error);
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });
     }

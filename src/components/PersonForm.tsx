@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
-import { X, Save, User } from 'lucide-react';
+import { X, Save, User, Calendar, Heart, Users, Baby } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select';
 import { Card } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import { Person, CreatePersonData } from '@/types';
 import axios from 'axios';
@@ -32,26 +33,55 @@ const personSchema = z.object({
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
   gender: z.enum(['MALE', 'FEMALE', 'UNKNOWN']).default('UNKNOWN'),
-  birthYear: z.number().min(1900).max(new Date().getFullYear()).optional(),
-  deathYear: z.number().min(1900).max(new Date().getFullYear()).optional(),
-  dateOfBirth: z.string().optional(), // New optional field (ISO date string)
+  birthYear: z.union([z.number().min(1900).max(new Date().getFullYear()), z.nan()]).optional().transform(val => isNaN(val as number) ? undefined : val),
+  deathYear: z.union([z.number().min(1900).max(new Date().getFullYear()), z.nan()]).optional().transform(val => isNaN(val as number) ? undefined : val),
+  dateOfBirth: z.string().optional(),
+  dateOfDeath: z.string().optional(),
   location: z.string().optional(),
-  fatherId: z.string().optional(),
-  motherId: z.string().optional(),
-  spouseId: z.string().optional(),
+  relationshipType: z.enum(['none', 'child', 'spouse', 'parent']).default('none'),
+  relatedPersonId: z.string().optional(),
 }).refine(
   (data) => {
+    // Death year must be equal to or greater than birth year (only if both are provided)
     if (
       typeof data.birthYear === 'number' &&
-      typeof data.deathYear === 'number'
+      typeof data.deathYear === 'number' &&
+      !isNaN(data.birthYear) &&
+      !isNaN(data.deathYear)
     ) {
       return data.deathYear >= data.birthYear;
     }
     return true;
   },
   {
-    message: 'Year of death must not be less than year of birth',
+    message: 'Year of death must be equal to or greater than year of birth',
     path: ['deathYear'],
+  }
+).refine(
+  (data) => {
+    // If both dateOfBirth and dateOfDeath are provided, death date must be after birth date
+    if (data.dateOfBirth && data.dateOfDeath) {
+      const birthDate = new Date(data.dateOfBirth);
+      const deathDate = new Date(data.dateOfDeath);
+      return deathDate >= birthDate;
+    }
+    return true;
+  },
+  {
+    message: 'Date of death must be equal to or after date of birth',
+    path: ['dateOfDeath'],
+  }
+).refine(
+  (data) => {
+    // If relationship type is not 'none', relatedPersonId is required
+    if (data.relationshipType !== 'none' && !data.relatedPersonId) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: 'Please select a person for this relationship',
+    path: ['relatedPersonId'],
   }
 );
 
@@ -90,23 +120,35 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
       birthYear: person.birthYear || undefined,
       deathYear: person.deathYear || undefined,
       dateOfBirth: person.dateOfBirth || undefined,
+      dateOfDeath: person.dateOfDeath || undefined,
       location: person.location || undefined,
-      fatherId: person.fatherId || undefined,
-      motherId: person.motherId || undefined,
-      spouseId: person.spouseId || undefined,
+      relationshipType: 'none',
+      relatedPersonId: undefined,
     } : {
       gender: 'UNKNOWN',
+      relationshipType: 'none',
     },
   });
 
   const watchedGender = watch('gender');
   const watchedFirstName = watch('firstName');
   const watchedLastName = watch('lastName');
+  const watchedRelationshipType = watch('relationshipType');
+  const watchedRelatedPersonId = watch('relatedPersonId');
 
   const createMutation = useMutation({
-    mutationFn: async (data: CreatePersonData) => {
-      const response = await axios.post('/api/persons', data);
-      return response.data;
+    mutationFn: async (data: CreatePersonData & { relationshipType?: string; relatedPersonId?: string }) => {
+      // Create the person first
+      const { relationshipType, relatedPersonId, ...personData } = data;
+      const response = await axios.post('/api/persons', personData);
+      const newPerson = response.data;
+
+      // Handle relationship creation
+      if (relationshipType && relationshipType !== 'none' && relatedPersonId) {
+        await handleRelationshipCreation(newPerson.id, relationshipType, relatedPersonId);
+      }
+
+      return newPerson;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['persons'] });
@@ -120,7 +162,8 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
 
   const updateMutation = useMutation({
     mutationFn: async (data: CreatePersonData) => {
-      const response = await axios.put(`/api/persons/${person!.id}`, data);
+      const { relationshipType, relatedPersonId, ...personData } = data as any;
+      const response = await axios.put(`/api/persons/${person!.id}`, personData);
       return response.data;
     },
     onSuccess: () => {
@@ -133,15 +176,59 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
     },
   });
 
+  const handleRelationshipCreation = async (newPersonId: string, relationshipType: string, relatedPersonId: string) => {
+    try {
+      const relatedPerson = allPersons.find(p => p.id === relatedPersonId);
+      if (!relatedPerson) return;
+
+      let updateData: any = {};
+
+      switch (relationshipType) {
+        case 'child':
+          // New person is a child of the related person
+          if (relatedPerson.gender === 'MALE') {
+            updateData.fatherId = relatedPersonId;
+          } else if (relatedPerson.gender === 'FEMALE') {
+            updateData.motherId = relatedPersonId;
+          }
+          break;
+        
+        case 'parent':
+          // New person is a parent of the related person
+          if (watchedGender === 'MALE') {
+            await axios.put(`/api/persons/${relatedPersonId}`, { fatherId: newPersonId });
+          } else if (watchedGender === 'FEMALE') {
+            await axios.put(`/api/persons/${relatedPersonId}`, { motherId: newPersonId });
+          }
+          break;
+        
+        case 'spouse':
+          // Mutual spouse relationship
+          updateData.spouseId = relatedPersonId;
+          await axios.put(`/api/persons/${relatedPersonId}`, { spouseId: newPersonId });
+          break;
+      }
+
+      if (Object.keys(updateData).length > 0) {
+        await axios.put(`/api/persons/${newPersonId}`, updateData);
+      }
+    } catch (error) {
+      console.error('Failed to create relationship:', error);
+    }
+  };
+
   const onSubmit = (data: PersonFormData) => {
-    const submitData: CreatePersonData = {
-      ...data,
+    const submitData: CreatePersonData & { relationshipType?: string; relatedPersonId?: string } = {
+      firstName: data.firstName,
+      lastName: data.lastName,
+      gender: data.gender,
       birthYear: data.birthYear || undefined,
       deathYear: data.deathYear || undefined,
+      dateOfBirth: data.dateOfBirth || undefined,
+      dateOfDeath: data.dateOfDeath || undefined,
       location: data.location || undefined,
-      fatherId: data.fatherId || undefined,
-      motherId: data.motherId || undefined,
-      spouseId: data.spouseId || undefined,
+      relationshipType: data.relationshipType,
+      relatedPersonId: data.relatedPersonId,
     };
 
     if (isEditing) {
@@ -159,8 +246,41 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
     }
   };
 
-  const getAvailableRelatives = (excludeId?: string) => {
-    return allPersons.filter(p => p.id !== excludeId && p.id !== person?.id);
+  const getAvailablePersonsForRelationship = () => {
+    const excludeCurrentPerson = allPersons.filter(p => p.id !== person?.id);
+    
+    switch (watchedRelationshipType) {
+      case 'parent':
+        // Anyone can be a parent
+        return excludeCurrentPerson;
+      case 'child':
+        // Anyone can be a child
+        return excludeCurrentPerson;
+      case 'spouse':
+        // Anyone can be a spouse (though typically opposite gender)
+        return excludeCurrentPerson;
+      default:
+        return excludeCurrentPerson;
+    }
+  };
+
+  const getRelationshipDescription = () => {
+    const relatedPerson = allPersons.find(p => p.id === watchedRelatedPersonId);
+    if (!relatedPerson || watchedRelationshipType === 'none') return '';
+
+    const newPersonName = `${watchedFirstName || 'This person'} ${watchedLastName || ''}`.trim();
+    const relatedPersonName = `${relatedPerson.firstName} ${relatedPerson.lastName}`;
+
+    switch (watchedRelationshipType) {
+      case 'child':
+        return `${newPersonName} will be a child of ${relatedPersonName}`;
+      case 'parent':
+        return `${newPersonName} will be a parent of ${relatedPersonName}`;
+      case 'spouse':
+        return `${newPersonName} will be married to ${relatedPersonName}`;
+      default:
+        return '';
+    }
   };
 
   const getInitials = (firstName?: string, lastName?: string) => {
@@ -170,7 +290,7 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
             <User className="h-5 w-5" />
@@ -180,201 +300,283 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           {/* Preview */}
-          <Card className="p-4 bg-gray-50">
-            <div className="flex items-center space-x-3">
-              <Avatar className="h-12 w-12">
+          <Card className="p-4 bg-gradient-to-r from-blue-50 to-purple-50">
+            <div className="flex items-center space-x-4">
+              <Avatar className="h-16 w-16">
                 <AvatarFallback 
                   style={{ backgroundColor: getGenderColor(watchedGender) }}
                 >
-                  <span className="text-white font-medium">
+                  <span className="text-white font-medium text-lg">
                     {getInitials(watchedFirstName, watchedLastName)}
                   </span>
                 </AvatarFallback>
               </Avatar>
-              <div>
-                <h3 className="font-medium">
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold">
                   {watchedFirstName || 'First'} {watchedLastName || 'Last'}
                 </h3>
                 <p className="text-sm text-gray-600 capitalize">
                   {watchedGender.toLowerCase()}
                 </p>
+                {getRelationshipDescription() && (
+                  <p className="text-sm text-blue-600 mt-1">
+                    {getRelationshipDescription()}
+                  </p>
+                )}
               </div>
             </div>
           </Card>
 
           {/* Basic Information */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="firstName">First Name *</Label>
-              <Input
-                id="firstName"
-                {...register('firstName')}
-                placeholder="Enter first name"
-              />
-              {errors.firstName && (
-                <p className="text-sm text-red-600 mt-1">{errors.firstName.message}</p>
-              )}
-            </div>
-
-            <div>
-              <Label htmlFor="lastName">Last Name *</Label>
-              <Input
-                id="lastName"
-                {...register('lastName')}
-                placeholder="Enter last name"
-              />
-              {errors.lastName && (
-                <p className="text-sm text-red-600 mt-1">{errors.lastName.message}</p>
-              )}
-            </div>
-          </div>
-
-           <div className="grid grid-cols-4 gap-4">
-            <div>
-              <Label>Gender</Label>
-              <Select
-                value={watchedGender}
-                onValueChange={(value) => setValue('gender', value as any)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="MALE">Male</SelectItem>
-                  <SelectItem value="FEMALE">Female</SelectItem>
-                  <SelectItem value="UNKNOWN">Unknown</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="birthYear">Birth Year</Label>
-              <Input
-                id="birthYear"
-                type="number"
-                {...register('birthYear', { valueAsNumber: true })}
-                placeholder="e.g. 1990"
-              />
-              {errors.birthYear && (
-                <p className="text-sm text-red-600 mt-1">{errors.birthYear.message}</p>
-              )}
-            </div>
-
-            <div>
-              <Label htmlFor="deathYear">Death Year</Label>
-              <Input
-                id="deathYear"
-                type="number"
-                {...register('deathYear', { valueAsNumber: true })}
-                placeholder="Leave empty if alive"
-              />
-              {errors.deathYear && (
-                <p className="text-sm text-red-600 mt-1">{errors.deathYear.message}</p>
-              )}
-            </div>
-
-            <div>
-              <Label htmlFor="dateOfBirth">Date of Birth</Label>
-              <Input
-                id="dateOfBirth"
-                type="date"
-                {...register('dateOfBirth')}
-                placeholder="YYYY-MM-DD"
-              />
-              {errors.dateOfBirth && (
-                <p className="text-sm text-red-600 mt-1">{errors.dateOfBirth.message}</p>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="location">Location</Label>
-            <Input
-              id="location"
-              {...register('location')}
-              placeholder="e.g. New York, USA"
-            />
-          </div>
-
-          {/* Relationships */}
           <div className="space-y-4">
-            <h3 className="font-medium text-gray-900">Family Relationships</h3>
+            <h3 className="text-lg font-medium flex items-center">
+              <User className="h-5 w-5 mr-2" />
+              Basic Information
+            </h3>
             
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label>Father</Label>
+                <Label htmlFor="firstName">First Name *</Label>
+                <Input
+                  id="firstName"
+                  {...register('firstName')}
+                  placeholder="Enter first name"
+                  className="mt-1"
+                />
+                {errors.firstName && (
+                  <p className="text-sm text-red-600 mt-1">{errors.firstName.message}</p>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="lastName">Last Name *</Label>
+                <Input
+                  id="lastName"
+                  {...register('lastName')}
+                  placeholder="Enter last name"
+                  className="mt-1"
+                />
+                {errors.lastName && (
+                  <p className="text-sm text-red-600 mt-1">{errors.lastName.message}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Gender</Label>
                 <Select
-                  value={watch('fatherId') || 'none'}
-                  onValueChange={(value) => setValue('fatherId', value === 'none' ? undefined : value)}
+                  value={watchedGender}
+                  onValueChange={(value) => setValue('gender', value as any)}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select father" />
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {getAvailableRelatives().filter(p => p.gender === 'MALE').map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.firstName} {p.lastName}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="MALE">Male</SelectItem>
+                    <SelectItem value="FEMALE">Female</SelectItem>
+                    <SelectItem value="UNKNOWN">Prefer not to say</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
               <div>
-                <Label>Mother</Label>
-                <Select
-                  value={watch('motherId') || 'none'}
-                  onValueChange={(value) => setValue('motherId', value === 'none' ? undefined : value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select mother" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {getAvailableRelatives().filter(p => p.gender === 'FEMALE').map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.firstName} {p.lastName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label>Spouse</Label>
-                <Select
-                  value={watch('spouseId') || 'none'}
-                  onValueChange={(value) => setValue('spouseId', value === 'none' ? undefined : value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select spouse" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {getAvailableRelatives().map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.firstName} {p.lastName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="location">Location</Label>
+                <Input
+                  id="location"
+                  {...register('location')}
+                  placeholder="e.g. New York, USA"
+                  className="mt-1"
+                />
               </div>
             </div>
           </div>
+
+          <Separator />
+
+          {/* Dates Section */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-medium flex items-center">
+              <Calendar className="h-5 w-5 mr-2" />
+              Important Dates
+            </h3>
+            
+            <div className="grid grid-cols-2 gap-6">
+              {/* Birth Information */}
+              <div className="space-y-3">
+                <h4 className="font-medium text-green-700">Birth Information</h4>
+                <div className="space-y-2">
+                  <div>
+                    <Label htmlFor="dateOfBirth">Date of Birth</Label>
+                    <Input
+                      id="dateOfBirth"
+                      type="date"
+                      {...register('dateOfBirth')}
+                      className="mt-1"
+                    />
+                    {errors.dateOfBirth && (
+                      <p className="text-sm text-red-600 mt-1">{errors.dateOfBirth.message}</p>
+                    )}
+                  </div>
+                  <div>
+                    <Label htmlFor="birthYear">Birth Year (if exact date unknown)</Label>
+                    <Input
+                      id="birthYear"
+                      type="number"
+                      {...register('birthYear', { 
+                        valueAsNumber: true,
+                        setValueAs: (value) => value === '' ? undefined : Number(value)
+                      })}
+                      placeholder="e.g. 1990"
+                      className="mt-1"
+                    />
+                    {errors.birthYear && (
+                      <p className="text-sm text-red-600 mt-1">{errors.birthYear.message}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Death Information */}
+              <div className="space-y-3">
+                <h4 className="font-medium text-gray-700">Death Information (Optional)</h4>
+                <div className="space-y-2">
+                  <div>
+                    <Label htmlFor="dateOfDeath">Date of Death</Label>
+                    <Input
+                      id="dateOfDeath"
+                      type="date"
+                      {...register('dateOfDeath')}
+                      className="mt-1"
+                    />
+                    {errors.dateOfDeath && (
+                      <p className="text-sm text-red-600 mt-1">{errors.dateOfDeath.message}</p>
+                    )}
+                  </div>
+                  <div>
+                    <Label htmlFor="deathYear">Death Year (if exact date unknown)</Label>
+                    <Input
+                      id="deathYear"
+                      type="number"
+                      {...register('deathYear', { 
+                        valueAsNumber: true,
+                        setValueAs: (value) => value === '' ? undefined : Number(value)
+                      })}
+                      placeholder="Leave empty if alive"
+                      className="mt-1"
+                    />
+                    {errors.deathYear && (
+                      <p className="text-sm text-red-600 mt-1">{errors.deathYear.message}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Relationships - Only show for new persons */}
+          {!isEditing && (
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium flex items-center">
+                <Heart className="h-5 w-5 mr-2" />
+                Family Relationship
+              </h3>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Relationship Type</Label>
+                  <Select
+                    value={watchedRelationshipType}
+                    onValueChange={(value) => {
+                      setValue('relationshipType', value as any);
+                      setValue('relatedPersonId', undefined);
+                    }}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No relationship now</SelectItem>
+                      <SelectItem value="child">
+                        <div className="flex items-center">
+                          <Baby className="h-4 w-4 mr-2" />
+                          Child of someone
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="parent">
+                        <div className="flex items-center">
+                          <Users className="h-4 w-4 mr-2" />
+                          Parent of someone
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="spouse">
+                        <div className="flex items-center">
+                          <Heart className="h-4 w-4 mr-2" />
+                          Married to someone
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {watchedRelationshipType !== 'none' && (
+                  <div>
+                    <Label>Select Person</Label>
+                    <Select
+                      value={watchedRelatedPersonId || 'none'}
+                      onValueChange={(value) => setValue('relatedPersonId', value === 'none' ? undefined : value)}
+                    >
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder="Choose a person" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Select a person</SelectItem>
+                        {getAvailablePersonsForRelationship().map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            <div className="flex items-center space-x-2">
+                              <div 
+                                className="w-3 h-3 rounded-full" 
+                                style={{ backgroundColor: p.avatarColor }}
+                              />
+                              <span>{p.firstName} {p.lastName}</span>
+                              <span className="text-xs text-gray-500">
+                                ({p.gender.toLowerCase()})
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.relatedPersonId && (
+                      <p className="text-sm text-red-600 mt-1">{errors.relatedPersonId.message}</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {getRelationshipDescription() && (
+                <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-sm text-blue-800">{getRelationshipDescription()}</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Actions */}
-          <div className="flex justify-end space-x-2 pt-4 border-t">
+          <div className="flex justify-end space-x-3 pt-6 border-t">
             <Button type="button" variant="outline" onClick={onClose}>
-              <X className="h-4 w-4 mr-1" />
+              <X className="h-4 w-4 mr-2" />
               Cancel
             </Button>
             <Button 
               type="submit" 
               disabled={createMutation.isPending || updateMutation.isPending}
+              className="min-w-[120px]"
             >
-              <Save className="h-4 w-4 mr-1" />
-              {isEditing ? 'Update' : 'Add'} Family Member
+              <Save className="h-4 w-4 mr-2" />
+              {isEditing ? 'Update' : 'Add'} Member
             </Button>
           </div>
         </form>

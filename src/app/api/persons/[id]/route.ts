@@ -8,13 +8,44 @@ const UpdatePersonSchema = z.object({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   gender: z.enum(['MALE', 'FEMALE', 'UNKNOWN']).optional(),
-  birthYear: z.number().optional(),
-  deathYear: z.number().optional(),
+  birthYear: z.number().min(1900).max(new Date().getFullYear()).optional(),
+  deathYear: z.number().min(1900).max(new Date().getFullYear()).optional(),
+  dateOfBirth: z.string().optional(),
+  dateOfDeath: z.string().optional(),
   location: z.string().optional(),
   fatherId: z.string().optional(),
   motherId: z.string().optional(),
   spouseId: z.string().optional(),
-});
+}).refine(
+  (data) => {
+    // Death year must be equal to or greater than birth year
+    if (
+      typeof data.birthYear === 'number' &&
+      typeof data.deathYear === 'number'
+    ) {
+      return data.deathYear >= data.birthYear;
+    }
+    return true;
+  },
+  {
+    message: 'Year of death must be equal to or greater than year of birth',
+    path: ['deathYear'],
+  }
+).refine(
+  (data) => {
+    // If both dateOfBirth and dateOfDeath are provided, death date must be after birth date
+    if (data.dateOfBirth && data.dateOfDeath) {
+      const birthDate = new Date(data.dateOfBirth);
+      const deathDate = new Date(data.dateOfDeath);
+      return deathDate >= birthDate;
+    }
+    return true;
+  },
+  {
+    message: 'Date of death must be equal to or after date of birth',
+    path: ['dateOfDeath'],
+  }
+);
 
 // GET single person
 export async function GET(
@@ -39,6 +70,7 @@ export async function GET(
     
     return NextResponse.json(person);
   } catch (error) {
+    console.error('Error fetching person:', error);
     return NextResponse.json({ error: 'Failed to fetch person' }, { status: 500 });
   }
 }
@@ -71,6 +103,7 @@ export async function PUT(
     
     return NextResponse.json(person);
   } catch (error) {
+    console.error('Error updating person:', error);
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });
     }
@@ -107,6 +140,7 @@ export async function DELETE(
     
     return NextResponse.json({ message: 'Person deleted successfully' });
   } catch (error) {
+    console.error('Error deleting person:', error);
     return NextResponse.json({ error: 'Failed to delete person' }, { status: 500 });
   }
 }

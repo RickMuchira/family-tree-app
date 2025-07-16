@@ -1,11 +1,12 @@
 export interface Person {
-  dateOfBirth?: string;
   id: string;
   firstName: string;
   lastName: string;
   gender: 'MALE' | 'FEMALE' | 'UNKNOWN';
   birthYear?: number;
   deathYear?: number;
+  dateOfBirth?: string; // ISO date string
+  dateOfDeath?: string; // ISO date string
   location?: string;
   avatarColor: string;
   fatherId?: string;
@@ -30,12 +31,13 @@ export interface PersonBasic {
 }
 
 export interface CreatePersonData {
-  dateOfBirth?: string;
   firstName: string;
   lastName: string;
   gender?: 'MALE' | 'FEMALE' | 'UNKNOWN';
   birthYear?: number;
   deathYear?: number;
+  dateOfBirth?: string; // ISO date string
+  dateOfDeath?: string; // ISO date string
   location?: string;
   fatherId?: string;
   motherId?: string;
@@ -49,8 +51,19 @@ export interface TreeNode {
   avatarColor: string;
   birthYear?: number;
   deathYear?: number;
+  dateOfBirth?: string;
+  dateOfDeath?: string;
   x: number;
   y: number;
   children: TreeNode[];
   spouse?: TreeNode;
+  level: number; // Add level for better tree layout
+}
+
+export interface FamilyRelationship {
+  id: string;
+  type: 'parent' | 'child' | 'spouse' | 'sibling';
+  personId: string;
+  relatedPersonId: string;
+  createdAt: string;
 }
