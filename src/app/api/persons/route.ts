@@ -18,6 +18,7 @@ const PersonSchema = z.object({
   spouseId: z.string().optional(),
 }).refine(
   (data) => {
+    // If both birthYear and deathYear are provided, death year must be >= birth year
     if (
       typeof data.birthYear === 'number' &&
       typeof data.deathYear === 'number'
@@ -32,6 +33,7 @@ const PersonSchema = z.object({
   }
 ).refine(
   (data) => {
+    // If both full dates are provided, death date must be >= birth date
     if (data.dateOfBirth && data.dateOfDeath) {
       const birthDate = new Date(data.dateOfBirth);
       const deathDate = new Date(data.dateOfDeath);
@@ -41,6 +43,36 @@ const PersonSchema = z.object({
   },
   {
     message: 'Date of death must be equal to or after date of birth',
+    path: ['dateOfDeath'],
+  }
+).refine(
+  (data) => {
+    // If dateOfBirth is provided but no birthYear, extract year from date
+    if (data.dateOfBirth && !data.birthYear) {
+      const birthYear = new Date(data.dateOfBirth).getFullYear();
+      if (data.deathYear && data.deathYear < birthYear) {
+        return false;
+      }
+    }
+    return true;
+  },
+  {
+    message: 'Death year must be equal to or greater than birth year (from date)',
+    path: ['deathYear'],
+  }
+).refine(
+  (data) => {
+    // If dateOfDeath is provided but no deathYear, extract year from date
+    if (data.dateOfDeath && !data.deathYear) {
+      const deathYear = new Date(data.dateOfDeath).getFullYear();
+      if (data.birthYear && deathYear < data.birthYear) {
+        return false;
+      }
+    }
+    return true;
+  },
+  {
+    message: 'Date of death must be equal to or after birth year',
     path: ['dateOfDeath'],
   }
 );

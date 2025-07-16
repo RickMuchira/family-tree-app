@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { z } from 'zod';
 
 const prisma = new PrismaClient();
@@ -18,7 +18,7 @@ const UpdatePersonSchema = z.object({
   spouseId: z.string().optional(),
 }).refine(
   (data) => {
-    // Death year must be equal to or greater than birth year
+    // If both birthYear and deathYear are provided, death year must be >= birth year
     if (
       typeof data.birthYear === 'number' &&
       typeof data.deathYear === 'number'
@@ -28,21 +28,37 @@ const UpdatePersonSchema = z.object({
     return true;
   },
   {
-    message: 'Year of death must be equal to or greater than year of birth',
-    path: ['deathYear'],
+    message: 'Date of death must be equal to or after date of birth',
+    path: ['dateOfDeath'],
   }
 ).refine(
   (data) => {
-    // If both dateOfBirth and dateOfDeath are provided, death date must be after birth date
-    if (data.dateOfBirth && data.dateOfDeath) {
-      const birthDate = new Date(data.dateOfBirth);
-      const deathDate = new Date(data.dateOfDeath);
-      return deathDate >= birthDate;
+    // If dateOfBirth is provided but no birthYear, extract year from date
+    if (data.dateOfBirth && !data.birthYear) {
+      const birthYear = new Date(data.dateOfBirth).getFullYear();
+      if (data.deathYear && data.deathYear < birthYear) {
+        return false;
+      }
     }
     return true;
   },
   {
-    message: 'Date of death must be equal to or after date of birth',
+    message: 'Death year must be equal to or greater than birth year (from date)',
+    path: ['deathYear'],
+  }
+).refine(
+  (data) => {
+    // If dateOfDeath is provided but no deathYear, extract year from date
+    if (data.dateOfDeath && !data.deathYear) {
+      const deathYear = new Date(data.dateOfDeath).getFullYear();
+      if (data.birthYear && deathYear < data.birthYear) {
+        return false;
+      }
+    }
+    return true;
+  },
+  {
+    message: 'Date of death must be equal to or after birth year',
     path: ['dateOfDeath'],
   }
 );
@@ -85,7 +101,7 @@ export async function PUT(
     const validatedData = UpdatePersonSchema.parse(body);
     
     // Update avatar color if gender changed
-    let updateData = { ...validatedData };
+    let updateData: Prisma.PersonUpdateInput = { ...validatedData };
     if (validatedData.gender) {
       updateData.avatarColor = validatedData.gender === 'MALE' ? '#3B82F6' : 
                               validatedData.gender === 'FEMALE' ? '#EC4899' : '#6B7280';

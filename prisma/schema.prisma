@@ -1,12 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -28,7 +22,7 @@ model Person {
   location    String?
   avatarColor String    @default("#6B7280")
   
-  // Family relationships
+  // Direct family relationships
   fatherId    String?
   motherId    String?
   spouseId    String?
@@ -43,14 +37,80 @@ model Person {
   motherChildren Person[] @relation("MotherChildren")
   spouseOf       Person[] @relation("Spouse")
   
+  // Extended relationship connections
+  relationshipsFrom Relationship[] @relation("PersonFrom")
+  relationshipsTo   Relationship[] @relation("PersonTo")
+  
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   
   @@map("persons")
 }
 
+model Relationship {
+  id              String           @id @default(cuid())
+  type            RelationshipType
+  personFromId    String
+  personToId      String
+  
+  // Relations
+  personFrom      Person @relation("PersonFrom", fields: [personFromId], references: [id], onDelete: Cascade)
+  personTo        Person @relation("PersonTo", fields: [personToId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Ensure no duplicate relationships
+  @@unique([personFromId, personToId, type])
+  @@map("relationships")
+}
+
 enum Gender {
   MALE
   FEMALE
   UNKNOWN
+}
+
+enum RelationshipType {
+  // Sibling relationships
+  SIBLING
+  HALF_SIBLING
+  STEP_SIBLING
+  
+  // Grandparent relationships
+  GRANDPARENT
+  GRANDCHILD
+  
+  // Extended family
+  AUNT_UNCLE
+  NIECE_NEPHEW
+  
+  // Cousin relationships
+  FIRST_COUSIN
+  SECOND_COUSIN
+  
+  // In-law relationships
+  PARENT_IN_LAW
+  CHILD_IN_LAW
+  SIBLING_IN_LAW
+  
+  // Step relationships
+  STEP_PARENT
+  STEP_CHILD
+  
+  // Godparent relationships
+  GODPARENT
+  GODCHILD
+  
+  // Adoptive relationships
+  ADOPTIVE_PARENT
+  ADOPTIVE_CHILD
+  
+  // Guardian relationships
+  GUARDIAN
+  WARD
+  
+  // Friend/Close relationships
+  CLOSE_FRIEND
+  FAMILY_FRIEND
 }

@@ -394,7 +394,7 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
 
           <Separator />
 
-          {/* Dates Section */}
+          {/* Dates Section - Updated to remove year fields */}
           <div className="space-y-4">
             <h3 className="text-lg font-medium flex items-center">
               <Calendar className="h-5 w-5 mr-2" />
@@ -407,19 +407,7 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
                 <h4 className="font-medium text-green-700">Birth Information</h4>
                 <div className="space-y-2">
                   <div>
-                    <Label htmlFor="dateOfBirth">Date of Birth</Label>
-                    <Input
-                      id="dateOfBirth"
-                      type="date"
-                      {...register('dateOfBirth')}
-                      className="mt-1"
-                    />
-                    {errors.dateOfBirth && (
-                      <p className="text-sm text-red-600 mt-1">{errors.dateOfBirth.message}</p>
-                    )}
-                  </div>
-                  <div>
-                    <Label htmlFor="birthYear">Birth Year (if exact date unknown)</Label>
+                    <Label htmlFor="birthYear">Birth Year *</Label>
                     <Input
                       id="birthYear"
                       type="number"
@@ -434,6 +422,21 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
                       <p className="text-sm text-red-600 mt-1">{errors.birthYear.message}</p>
                     )}
                   </div>
+                  <div>
+                    <Label htmlFor="dateOfBirth">Full Date of Birth (Optional)</Label>
+                    <Input
+                      id="dateOfBirth"
+                      type="date"
+                      {...register('dateOfBirth')}
+                      className="mt-1"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Leave empty if you only know the birth year
+                    </p>
+                    {errors.dateOfBirth && (
+                      <p className="text-sm text-red-600 mt-1">{errors.dateOfBirth.message}</p>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -442,19 +445,7 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
                 <h4 className="font-medium text-gray-700">Death Information (Optional)</h4>
                 <div className="space-y-2">
                   <div>
-                    <Label htmlFor="dateOfDeath">Date of Death</Label>
-                    <Input
-                      id="dateOfDeath"
-                      type="date"
-                      {...register('dateOfDeath')}
-                      className="mt-1"
-                    />
-                    {errors.dateOfDeath && (
-                      <p className="text-sm text-red-600 mt-1">{errors.dateOfDeath.message}</p>
-                    )}
-                  </div>
-                  <div>
-                    <Label htmlFor="deathYear">Death Year (if exact date unknown)</Label>
+                    <Label htmlFor="deathYear">Death Year</Label>
                     <Input
                       id="deathYear"
                       type="number"
@@ -467,6 +458,21 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
                     />
                     {errors.deathYear && (
                       <p className="text-sm text-red-600 mt-1">{errors.deathYear.message}</p>
+                    )}
+                  </div>
+                  <div>
+                    <Label htmlFor="dateOfDeath">Full Date of Death (Optional)</Label>
+                    <Input
+                      id="dateOfDeath"
+                      type="date"
+                      {...register('dateOfDeath')}
+                      className="mt-1"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Leave empty if you only know the death year
+                    </p>
+                    {errors.dateOfDeath && (
+                      <p className="text-sm text-red-600 mt-1">{errors.dateOfDeath.message}</p>
                     )}
                   </div>
                 </div>
