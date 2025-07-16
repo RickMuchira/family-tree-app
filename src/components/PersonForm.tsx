@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
-import { X, Save, User, Calendar, Heart, Users, Baby } from 'lucide-react';
+import { X, Save, User, Calendar, Heart, Users, Baby, UserPlus, Crown } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -25,8 +25,10 @@ import {
 import { Card } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Person, CreatePersonData } from '@/types';
+import { Person, CreatePersonData, RelationshipType } from '@/types';
+import { getRelationshipsByCategory, getCategoryInfo, getRelationshipInfo } from '@/lib/relationship-utils';
 import axios from 'axios';
 
 const personSchema = z.object({
@@ -38,7 +40,19 @@ const personSchema = z.object({
   dateOfBirth: z.string().optional(),
   dateOfDeath: z.string().optional(),
   location: z.string().optional(),
-  relationshipType: z.enum(['none', 'child', 'spouse', 'parent']).default('none'),
+  relationshipType: z.enum([
+    'none', 'child', 'spouse', 'parent',
+    'SIBLING', 'HALF_SIBLING', 'STEP_SIBLING',
+    'GRANDPARENT', 'GRANDCHILD',
+    'AUNT_UNCLE', 'NIECE_NEPHEW',
+    'FIRST_COUSIN', 'SECOND_COUSIN',
+    'PARENT_IN_LAW', 'CHILD_IN_LAW', 'SIBLING_IN_LAW',
+    'STEP_PARENT', 'STEP_CHILD',
+    'GODPARENT', 'GODCHILD',
+    'ADOPTIVE_PARENT', 'ADOPTIVE_CHILD',
+    'GUARDIAN', 'WARD',
+    'CLOSE_FRIEND', 'FAMILY_FRIEND'
+  ]).default('none'),
   relatedPersonId: z.string().optional(),
 }).refine(
   (data) => {
@@ -181,36 +195,46 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
       const relatedPerson = allPersons.find(p => p.id === relatedPersonId);
       if (!relatedPerson) return;
 
-      let updateData: any = {};
+      // Handle basic relationships (parent, child, spouse)
+      if (['child', 'parent', 'spouse'].includes(relationshipType)) {
+        let updateData: any = {};
 
-      switch (relationshipType) {
-        case 'child':
-          // New person is a child of the related person
-          if (relatedPerson.gender === 'MALE') {
-            updateData.fatherId = relatedPersonId;
-          } else if (relatedPerson.gender === 'FEMALE') {
-            updateData.motherId = relatedPersonId;
-          }
-          break;
-        
-        case 'parent':
-          // New person is a parent of the related person
-          if (watchedGender === 'MALE') {
-            await axios.put(`/api/persons/${relatedPersonId}`, { fatherId: newPersonId });
-          } else if (watchedGender === 'FEMALE') {
-            await axios.put(`/api/persons/${relatedPersonId}`, { motherId: newPersonId });
-          }
-          break;
-        
-        case 'spouse':
-          // Mutual spouse relationship
-          updateData.spouseId = relatedPersonId;
-          await axios.put(`/api/persons/${relatedPersonId}`, { spouseId: newPersonId });
-          break;
-      }
+        switch (relationshipType) {
+          case 'child':
+            // New person is a child of the related person
+            if (relatedPerson.gender === 'MALE') {
+              updateData.fatherId = relatedPersonId;
+            } else if (relatedPerson.gender === 'FEMALE') {
+              updateData.motherId = relatedPersonId;
+            }
+            break;
+          
+          case 'parent':
+            // New person is a parent of the related person
+            if (watchedGender === 'MALE') {
+              await axios.put(`/api/persons/${relatedPersonId}`, { fatherId: newPersonId });
+            } else if (watchedGender === 'FEMALE') {
+              await axios.put(`/api/persons/${relatedPersonId}`, { motherId: newPersonId });
+            }
+            break;
+          
+          case 'spouse':
+            // Mutual spouse relationship
+            updateData.spouseId = relatedPersonId;
+            await axios.put(`/api/persons/${relatedPersonId}`, { spouseId: newPersonId });
+            break;
+        }
 
-      if (Object.keys(updateData).length > 0) {
-        await axios.put(`/api/persons/${newPersonId}`, updateData);
+        if (Object.keys(updateData).length > 0) {
+          await axios.put(`/api/persons/${newPersonId}`, updateData);
+        }
+      } else {
+        // Handle extended relationships through the relationships API
+        await axios.post('/api/relationships', {
+          type: relationshipType,
+          personFromId: newPersonId,
+          personToId: relatedPersonId,
+        });
       }
     } catch (error) {
       console.error('Failed to create relationship:', error);
@@ -271,6 +295,7 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
     const newPersonName = `${watchedFirstName || 'This person'} ${watchedLastName || ''}`.trim();
     const relatedPersonName = `${relatedPerson.firstName} ${relatedPerson.lastName}`;
 
+    // Handle basic relationships
     switch (watchedRelationshipType) {
       case 'child':
         return `${newPersonName} will be a child of ${relatedPersonName}`;
@@ -278,9 +303,15 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
         return `${newPersonName} will be a parent of ${relatedPersonName}`;
       case 'spouse':
         return `${newPersonName} will be married to ${relatedPersonName}`;
-      default:
-        return '';
     }
+
+    // Handle extended relationships
+    const relationshipInfo = getRelationshipInfo(watchedRelationshipType as RelationshipType);
+    if (relationshipInfo) {
+      return `${newPersonName} will be a ${relationshipInfo.label.toLowerCase()} of ${relatedPersonName}`;
+    }
+
+    return '';
   };
 
   const getInitials = (firstName?: string, lastName?: string) => {
@@ -503,8 +534,10 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
                     <SelectTrigger className="mt-1">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-96">
                       <SelectItem value="none">No relationship now</SelectItem>
+                      
+                      {/* Basic Relationships */}
                       <SelectItem value="child">
                         <div className="flex items-center">
                           <Baby className="h-4 w-4 mr-2" />
@@ -523,6 +556,25 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
                           Married to someone
                         </div>
                       </SelectItem>
+                      
+                      {/* Extended Relationships by Category */}
+                      {Object.entries(getRelationshipsByCategory()).map(([category, relationships]) => (
+                        <div key={category}>
+                          <div className="px-2 py-1.5 text-xs font-medium text-gray-500 bg-gray-50">
+                            {getCategoryInfo(category)?.icon} {getCategoryInfo(category)?.label}
+                          </div>
+                          {relationships.map((relationship) => (
+                            <SelectItem key={relationship.type} value={relationship.type}>
+                              <div className="flex items-center">
+                                <span className="text-sm">{relationship.label}</span>
+                                <span className="text-xs text-gray-500 ml-2">
+                                  {relationship.description}
+                                </span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </div>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

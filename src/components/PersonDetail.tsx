@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { 
   X, 
   Edit, 
@@ -13,13 +13,16 @@ import {
   Baby,
   UserCheck,
   Clock,
-  CalendarDays
+  CalendarDays,
+  UserPlus,
+  Crown
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,7 +35,13 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Person } from '@/types';
+import { Person, Relationship } from '@/types';
+import { RelationshipManager } from '@/components/RelationshipManager';
+import { 
+  getCategoryInfo, 
+  getRelationshipInfo, 
+  getGenderSpecificLabel 
+} from '@/lib/relationship-utils';
 import axios from 'axios';
 
 interface PersonDetailProps {
@@ -43,7 +52,16 @@ interface PersonDetailProps {
 
 export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showRelationshipManager, setShowRelationshipManager] = useState(false);
   const queryClient = useQueryClient();
+
+  const { data: relationships = [] } = useQuery({
+    queryKey: ['relationships', person.id],
+    queryFn: async () => {
+      const response = await axios.get(`/api/relationships?personId=${person.id}`);
+      return response.data as Relationship[];
+    },
+  });
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -51,6 +69,7 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['persons'] });
+      queryClient.invalidateQueries({ queryKey: ['relationships'] });
       toast.success('Family member deleted successfully');
       onClose();
     },
@@ -157,6 +176,33 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
     
     return uniqueChildren;
   };
+
+  const getRelationshipDisplayInfo = (relationship: Relationship) => {
+    const isFrom = relationship.personFromId === person.id;
+    const relatedPerson = isFrom ? relationship.personTo : relationship.personFrom;
+    const relationshipInfo = getRelationshipInfo(relationship.type);
+    
+    let displayLabel = relationshipInfo.label;
+    if (relatedPerson) {
+      displayLabel = getGenderSpecificLabel(relationshipInfo, relatedPerson.gender || 'UNKNOWN');
+    }
+    
+    return {
+      person: relatedPerson,
+      label: displayLabel,
+      category: relationshipInfo.category,
+      description: relationshipInfo.description,
+    };
+  };
+
+  const groupedRelationships = relationships.reduce((acc, rel) => {
+    const info = getRelationshipDisplayInfo(rel);
+    if (!acc[info.category]) {
+      acc[info.category] = [];
+    }
+    acc[info.category].push({ ...rel, displayInfo: info });
+    return acc;
+  }, {} as Record<string, Array<Relationship & { displayInfo: any }>>);
 
   const allChildren = getAllChildren();
   const { birthInfo, deathInfo, ageInfo, isDeceased } = getDetailedAgeInfo();
@@ -280,7 +326,7 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
           </Card>
         )}
 
-        {/* Family Relationships */}
+        {/* Immediate Family Relationships */}
         <div className="space-y-4">
           {/* Parents */}
           {(person.father || person.mother) && (
@@ -392,6 +438,87 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
           )}
         </div>
 
+        {/* Extended Relationships */}
+        {relationships.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between text-sm font-medium">
+                <div className="flex items-center">
+                  <Crown className="h-4 w-4 mr-2" />
+                  Extended Relationships ({relationships.length})
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setShowRelationshipManager(true)}
+                >
+                  <UserPlus className="h-4 w-4 mr-1" />
+                  Manage
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-64">
+                <div className="space-y-4">
+                  {Object.entries(groupedRelationships).map(([category, categoryRelationships]) => (
+                    <div key={category}>
+                      <Badge className={`${getCategoryInfo(category)?.color} mb-2`}>
+                        {getCategoryInfo(category)?.icon} {getCategoryInfo(category)?.label}
+                      </Badge>
+                      
+                      <div className="space-y-2 ml-4">
+                        {categoryRelationships.map((relationship) => (
+                          <div key={relationship.id} className="flex items-center space-x-3">
+                            <Avatar className="h-8 w-8">
+                              <AvatarFallback 
+                                style={{ backgroundColor: relationship.displayInfo.person?.avatarColor }}
+                              >
+                                <span className="text-white text-xs">
+                                  {relationship.displayInfo.person ? 
+                                    getInitials(relationship.displayInfo.person.firstName, relationship.displayInfo.person.lastName) : 
+                                    '?'
+                                  }
+                                </span>
+                              </AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <p className="font-medium text-sm">
+                                {relationship.displayInfo.person?.firstName} {relationship.displayInfo.person?.lastName}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {relationship.displayInfo.label}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Add Relationships Button (if no extended relationships) */}
+        {relationships.length === 0 && (
+          <Card>
+            <CardContent className="p-6 text-center">
+              <Crown className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                No Extended Relationships
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Add relationships like siblings, grandparents, cousins, and more
+              </p>
+              <Button onClick={() => setShowRelationshipManager(true)}>
+                <UserPlus className="h-4 w-4 mr-2" />
+                Add Relationships
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Enhanced Family Summary */}
         <Card>
           <CardHeader className="pb-3">
@@ -434,12 +561,12 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
               
               <div className="p-3 bg-gray-50 rounded-lg text-center">
                 <div className="flex items-center justify-center mb-1">
-                  <Clock className="h-4 w-4 text-gray-600" />
+                  <Crown className="h-4 w-4 text-gray-600" />
                 </div>
                 <p className="text-sm font-medium text-gray-900">
-                  {isDeceased ? 'No' : 'Yes'}
+                  {relationships.length}
                 </p>
-                <p className="text-xs text-gray-500">Living</p>
+                <p className="text-xs text-gray-500">Extended</p>
               </div>
             </div>
             
@@ -462,6 +589,15 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
           >
             <Edit className="h-4 w-4 mr-2" />
             Edit Details
+          </Button>
+          
+          <Button 
+            onClick={() => setShowRelationshipManager(true)}
+            variant="outline"
+            className="flex-1"
+          >
+            <UserPlus className="h-4 w-4 mr-2" />
+            Manage Relationships
           </Button>
           
           <AlertDialog>
@@ -493,6 +629,14 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
           </AlertDialog>
         </div>
       </div>
+
+      {/* Relationship Manager Modal */}
+      {showRelationshipManager && (
+        <RelationshipManager
+          person={person}
+          onClose={() => setShowRelationshipManager(false)}
+        />
+      )}
     </div>
   );
 }
