@@ -1,0 +1,1432 @@
+prisma/schema.prisma
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Person {
+  id          String    @id @default(cuid())
+  firstName   String
+  lastName    String
+  gender      Gender    @default(UNKNOWN)
+  birthYear   Int?
+  deathYear   Int?
+  location    String?
+  avatarColor String    @default("#6B7280")
+  
+  // Family relationships
+  fatherId    String?
+  motherId    String?
+  spouseId    String?
+  
+  // Relations
+  father      Person?   @relation("FatherChildren", fields: [fatherId], references: [id])
+  mother      Person?   @relation("MotherChildren", fields: [motherId], references: [id])
+  spouse      Person?   @relation("Spouse", fields: [spouseId], references: [id])
+  
+  // Children relations
+  fatherChildren Person[] @relation("FatherChildren")
+  motherChildren Person[] @relation("MotherChildren")
+  spouseOf       Person[] @relation("Spouse")
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@map("persons")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  UNKNOWN
+}
+src/app/api/persons/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { PrismaClient } from '@prisma/client';
+import { z } from 'zod';
+
+const prisma = new PrismaClient();
+
+const PersonSchema = z.object({
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  gender: z.enum(['MALE', 'FEMALE', 'UNKNOWN']).default('UNKNOWN'),
+  birthYear: z.number().optional(),
+  deathYear: z.number().optional(),
+  location: z.string().optional(),
+  fatherId: z.string().optional(),
+  motherId: z.string().optional(),
+  spouseId: z.string().optional(),
+});
+
+// GET all persons
+export async function GET() {
+  try {
+    const persons = await prisma.person.findMany({
+      include: {
+        father: { select: { id: true, firstName: true, lastName: true } },
+        mother: { select: { id: true, firstName: true, lastName: true } },
+        spouse: { select: { id: true, firstName: true, lastName: true } },
+        fatherChildren: { select: { id: true, firstName: true, lastName: true } },
+        motherChildren: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    return NextResponse.json(persons);
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to fetch persons' }, { status: 500 });
+  }
+}
+
+// POST new person
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const validatedData = PersonSchema.parse(body);
+    
+    // Generate avatar color based on gender
+    const avatarColor = validatedData.gender === 'MALE' ? '#3B82F6' : 
+                       validatedData.gender === 'FEMALE' ? '#EC4899' : '#6B7280';
+    
+    const person = await prisma.person.create({
+      data: {
+        ...validatedData,
+        avatarColor,
+      },
+      include: {
+        father: { select: { id: true, firstName: true, lastName: true } },
+        mother: { select: { id: true, firstName: true, lastName: true } },
+        spouse: { select: { id: true, firstName: true, lastName: true } },
+      }
+    });
+    
+    return NextResponse.json(person, { status: 201 });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: error.errors }, { status: 400 });
+    }
+    return NextResponse.json({ error: 'Failed to create person' }, { status: 500 });
+  }
+}
+src/app/api/persons/[id]/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { PrismaClient } from '@prisma/client';
+import { z } from 'zod';
+
+const prisma = new PrismaClient();
+
+const UpdatePersonSchema = z.object({
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
+  gender: z.enum(['MALE', 'FEMALE', 'UNKNOWN']).optional(),
+  birthYear: z.number().optional(),
+  deathYear: z.number().optional(),
+  location: z.string().optional(),
+  fatherId: z.string().optional(),
+  motherId: z.string().optional(),
+  spouseId: z.string().optional(),
+});
+
+// GET single person
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const person = await prisma.person.findUnique({
+      where: { id: params.id },
+      include: {
+        father: { select: { id: true, firstName: true, lastName: true } },
+        mother: { select: { id: true, firstName: true, lastName: true } },
+        spouse: { select: { id: true, firstName: true, lastName: true } },
+        fatherChildren: { select: { id: true, firstName: true, lastName: true } },
+        motherChildren: { select: { id: true, firstName: true, lastName: true } },
+      }
+    });
+    
+    if (!person) {
+      return NextResponse.json({ error: 'Person not found' }, { status: 404 });
+    }
+    
+    return NextResponse.json(person);
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to fetch person' }, { status: 500 });
+  }
+}
+
+// PUT update person
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const body = await request.json();
+    const validatedData = UpdatePersonSchema.parse(body);
+    
+    // Update avatar color if gender changed
+    let updateData = { ...validatedData };
+    if (validatedData.gender) {
+      updateData.avatarColor = validatedData.gender === 'MALE' ? '#3B82F6' : 
+                              validatedData.gender === 'FEMALE' ? '#EC4899' : '#6B7280';
+    }
+    
+    const person = await prisma.person.update({
+      where: { id: params.id },
+      data: updateData,
+      include: {
+        father: { select: { id: true, firstName: true, lastName: true } },
+        mother: { select: { id: true, firstName: true, lastName: true } },
+        spouse: { select: { id: true, firstName: true, lastName: true } },
+      }
+    });
+    
+    return NextResponse.json(person);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: error.errors }, { status: 400 });
+    }
+    return NextResponse.json({ error: 'Failed to update person' }, { status: 500 });
+  }
+}
+
+// DELETE person
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    // First, remove relationships pointing to this person
+    await prisma.person.updateMany({
+      where: { 
+        OR: [
+          { fatherId: params.id },
+          { motherId: params.id },
+          { spouseId: params.id }
+        ]
+      },
+      data: {
+        fatherId: null,
+        motherId: null,
+        spouseId: null,
+      }
+    });
+    
+    // Then delete the person
+    await prisma.person.delete({
+      where: { id: params.id }
+    });
+    
+    return NextResponse.json({ message: 'Person deleted successfully' });
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to delete person' }, { status: 500 });
+  }
+}
+src/types/index.ts
+export interface Person {
+  id: string;
+  firstName: string;
+  lastName: string;
+  gender: 'MALE' | 'FEMALE' | 'UNKNOWN';
+  birthYear?: number;
+  deathYear?: number;
+  location?: string;
+  avatarColor: string;
+  fatherId?: string;
+  motherId?: string;
+  spouseId?: string;
+  
+  // Relations
+  father?: PersonBasic;
+  mother?: PersonBasic;
+  spouse?: PersonBasic;
+  fatherChildren?: PersonBasic[];
+  motherChildren?: PersonBasic[];
+  
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PersonBasic {
+  id: string;
+  firstName: string;
+  lastName: string;
+}
+
+export interface CreatePersonData {
+  firstName: string;
+  lastName: string;
+  gender?: 'MALE' | 'FEMALE' | 'UNKNOWN';
+  birthYear?: number;
+  deathYear?: number;
+  location?: string;
+  fatherId?: string;
+  motherId?: string;
+  spouseId?: string;
+}
+
+export interface TreeNode {
+  id: string;
+  name: string;
+  gender: 'MALE' | 'FEMALE' | 'UNKNOWN';
+  avatarColor: string;
+  birthYear?: number;
+  deathYear?: number;
+  x: number;
+  y: number;
+  children: TreeNode[];
+  spouse?: TreeNode;
+}
+src/components/PersonsList.tsx
+'use client';
+
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Search, Edit, Trash2, Users } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Card } from '@/components/ui/card';
+import { Person } from '@/types';
+import axios from 'axios';
+
+interface PersonsListProps {
+  onPersonSelect: (person: Person) => void;
+  onPersonEdit: (person: Person) => void;
+  selectedPersonId?: string;
+}
+
+export function PersonsList({ onPersonSelect, onPersonEdit, selectedPersonId }: PersonsListProps) {
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const { data: persons = [], isLoading, error } = useQuery({
+    queryKey: ['persons'],
+    queryFn: async () => {
+      const response = await axios.get('/api/persons');
+      return response.data as Person[];
+    },
+  });
+
+  const filteredPersons = persons.filter(person =>
+    `${person.firstName} ${person.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    person.location?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const getInitials = (firstName: string, lastName: string) => {
+    return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+  };
+
+  const getAgeDisplay = (birthYear?: number, deathYear?: number) => {
+    if (!birthYear) return '';
+    
+    if (deathYear) {
+      return `${birthYear}-${deathYear}`;
+    }
+    
+    const currentYear = new Date().getFullYear();
+    const age = currentYear - birthYear;
+    return `${age} years old`;
+  };
+
+  const getGenderColor = (gender: string) => {
+    switch (gender) {
+      case 'MALE': return 'bg-blue-500';
+      case 'FEMALE': return 'bg-pink-500';
+      default: return 'bg-gray-500';
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="p-4 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 text-center text-red-600">
+        Failed to load family members
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Search */}
+      <div className="p-4 border-b">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+          <Input
+            placeholder="Search family members..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="p-4 border-b bg-gray-50">
+        <div className="flex items-center text-sm text-gray-600">
+          <Users className="h-4 w-4 mr-2" />
+          {filteredPersons.length} of {persons.length} members
+        </div>
+      </div>
+
+      {/* List */}
+      <ScrollArea className="flex-1">
+        <div className="p-2">
+          {filteredPersons.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              {searchTerm ? 'No matching family members' : 'No family members added yet'}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filteredPersons.map((person) => (
+                <Card
+                  key={person.id}
+                  className={`p-3 cursor-pointer transition-colors hover:bg-gray-50 ${
+                    selectedPersonId === person.id ? 'ring-2 ring-blue-500 bg-blue-50' : ''
+                  }`}
+                  onClick={() => onPersonSelect(person)}
+                >
+                  <div className="flex items-center space-x-3">
+                    <Avatar className="h-10 w-10">
+                      <AvatarFallback 
+                        className={getGenderColor(person.gender)}
+                        style={{ backgroundColor: person.avatarColor }}
+                      >
+                        <span className="text-white font-medium">
+                          {getInitials(person.firstName, person.lastName)}
+                        </span>
+                      </AvatarFallback>
+                    </Avatar>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center space-x-2">
+                        <h3 className="font-medium text-gray-900 truncate">
+                          {person.firstName} {person.lastName}
+                        </h3>
+                        <Badge variant="outline" className="text-xs">
+                          {person.gender.toLowerCase()}
+                        </Badge>
+                      </div>
+                      
+                      <div className="text-sm text-gray-500 space-y-1">
+                        {getAgeDisplay(person.birthYear, person.deathYear) && (
+                          <div>{getAgeDisplay(person.birthYear, person.deathYear)}</div>
+                        )}
+                        {person.location && (
+                          <div className="truncate">{person.location}</div>
+                        )}
+                      </div>
+
+                      {/* Relationships */}
+                      <div className="flex items-center space-x-1 mt-1">
+                        {person.father && (
+                          <Badge variant="secondary" className="text-xs">
+                            Child
+                          </Badge>
+                        )}
+                        {person.spouse && (
+                          <Badge variant="secondary" className="text-xs">
+                            Married
+                          </Badge>
+                        )}
+                        {(person.fatherChildren?.length || person.motherChildren?.length) && (
+                          <Badge variant="secondary" className="text-xs">
+                            Parent
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onPersonEdit(person);
+                        }}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
+src/components/PersonForm.tsx
+'use client';
+
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
+import { z } from 'zod';
+import { X, Save, User } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Card } from '@/components/ui/card';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { toast } from 'sonner';
+import { Person, CreatePersonData } from '@/types';
+import axios from 'axios';
+
+const personSchema = z.object({
+  firstName: z.string().min(1, 'First name is required'),
+  lastName: z.string().min(1, 'Last name is required'),
+  gender: z.enum(['MALE', 'FEMALE', 'UNKNOWN']).default('UNKNOWN'),
+  birthYear: z.number().min(1900).max(new Date().getFullYear()).optional(),
+  deathYear: z.number().min(1900).max(new Date().getFullYear()).optional(),
+  location: z.string().optional(),
+  fatherId: z.string().optional(),
+  motherId: z.string().optional(),
+  spouseId: z.string().optional(),
+});
+
+type PersonFormData = z.infer<typeof personSchema>;
+
+interface PersonFormProps {
+  person?: Person | null;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
+  const queryClient = useQueryClient();
+  const isEditing = Boolean(person);
+
+  const { data: allPersons = [] } = useQuery({
+    queryKey: ['persons'],
+    queryFn: async () => {
+      const response = await axios.get('/api/persons');
+      return response.data as Person[];
+    },
+  });
+
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    formState: { errors },
+  } = useForm<PersonFormData>({
+    resolver: zodResolver(personSchema),
+    defaultValues: person ? {
+      firstName: person.firstName,
+      lastName: person.lastName,
+      gender: person.gender,
+      birthYear: person.birthYear || undefined,
+      deathYear: person.deathYear || undefined,
+      location: person.location || undefined,
+      fatherId: person.fatherId || undefined,
+      motherId: person.motherId || undefined,
+      spouseId: person.spouseId || undefined,
+    } : {
+      gender: 'UNKNOWN',
+    },
+  });
+
+  const watchedGender = watch('gender');
+  const watchedFirstName = watch('firstName');
+  const watchedLastName = watch('lastName');
+
+  const createMutation = useMutation({
+    mutationFn: async (data: CreatePersonData) => {
+      const response = await axios.post('/api/persons', data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['persons'] });
+      toast.success('Family member added successfully!');
+      onSuccess();
+    },
+    onError: () => {
+      toast.error('Failed to add family member');
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (data: CreatePersonData) => {
+      const response = await axios.put(`/api/persons/${person!.id}`, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['persons'] });
+      toast.success('Family member updated successfully!');
+      onSuccess();
+    },
+    onError: () => {
+      toast.error('Failed to update family member');
+    },
+  });
+
+  const onSubmit = (data: PersonFormData) => {
+    const submitData: CreatePersonData = {
+      ...data,
+      birthYear: data.birthYear || undefined,
+      deathYear: data.deathYear || undefined,
+      location: data.location || undefined,
+      fatherId: data.fatherId || undefined,
+      motherId: data.motherId || undefined,
+      spouseId: data.spouseId || undefined,
+    };
+
+    if (isEditing) {
+      updateMutation.mutate(submitData);
+    } else {
+      createMutation.mutate(submitData);
+    }
+  };
+
+  const getGenderColor = (gender: string) => {
+    switch (gender) {
+      case 'MALE': return '#3B82F6';
+      case 'FEMALE': return '#EC4899';
+      default: return '#6B7280';
+    }
+  };
+
+  const getAvailableRelatives = (excludeId?: string) => {
+    return allPersons.filter(p => p.id !== excludeId && p.id !== person?.id);
+  };
+
+  const getInitials = (firstName?: string, lastName?: string) => {
+    if (!firstName || !lastName) return '?';
+    return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+  };
+
+  return (
+    <Dialog open={true} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center space-x-2">
+            <User className="h-5 w-5" />
+            <span>{isEditing ? 'Edit Family Member' : 'Add Family Member'}</span>
+          </DialogTitle>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+          {/* Preview */}
+          <Card className="p-4 bg-gray-50">
+            <div className="flex items-center space-x-3">
+              <Avatar className="h-12 w-12">
+                <AvatarFallback 
+                  style={{ backgroundColor: getGenderColor(watchedGender) }}
+                >
+                  <span className="text-white font-medium">
+                    {getInitials(watchedFirstName, watchedLastName)}
+                  </span>
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                <h3 className="font-medium">
+                  {watchedFirstName || 'First'} {watchedLastName || 'Last'}
+                </h3>
+                <p className="text-sm text-gray-600 capitalize">
+                  {watchedGender.toLowerCase()}
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          {/* Basic Information */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="firstName">First Name *</Label>
+              <Input
+                id="firstName"
+                {...register('firstName')}
+                placeholder="Enter first name"
+              />
+              {errors.firstName && (
+                <p className="text-sm text-red-600 mt-1">{errors.firstName.message}</p>
+              )}
+            </div>
+
+            <div>
+              <Label htmlFor="lastName">Last Name *</Label>
+              <Input
+                id="lastName"
+                {...register('lastName')}
+                placeholder="Enter last name"
+              />
+              {errors.lastName && (
+                <p className="text-sm text-red-600 mt-1">{errors.lastName.message}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <Label>Gender</Label>
+              <Select
+                value={watchedGender}
+                onValueChange={(value) => setValue('gender', value as any)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="MALE">Male</SelectItem>
+                  <SelectItem value="FEMALE">Female</SelectItem>
+                  <SelectItem value="UNKNOWN">Unknown</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="birthYear">Birth Year</Label>
+              <Input
+                id="birthYear"
+                type="number"
+                {...register('birthYear', { valueAsNumber: true })}
+                placeholder="e.g. 1990"
+              />
+              {errors.birthYear && (
+                <p className="text-sm text-red-600 mt-1">{errors.birthYear.message}</p>
+              )}
+            </div>
+
+            <div>
+              <Label htmlFor="deathYear">Death Year</Label>
+              <Input
+                id="deathYear"
+                type="number"
+                {...register('deathYear', { valueAsNumber: true })}
+                placeholder="Leave empty if alive"
+              />
+              {errors.deathYear && (
+                <p className="text-sm text-red-600 mt-1">{errors.deathYear.message}</p>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="location">Location</Label>
+            <Input
+              id="location"
+              {...register('location')}
+              placeholder="e.g. New York, USA"
+            />
+          </div>
+
+          {/* Relationships */}
+          <div className="space-y-4">
+            <h3 className="font-medium text-gray-900">Family Relationships</h3>
+            
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <Label>Father</Label>
+                <Select
+                  value={watch('fatherId') || 'none'}
+                  onValueChange={(value) => setValue('fatherId', value === 'none' ? undefined : value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select father" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {getAvailableRelatives().filter(p => p.gender === 'MALE').map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.firstName} {p.lastName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>Mother</Label>
+                <Select
+                  value={watch('motherId') || 'none'}
+                  onValueChange={(value) => setValue('motherId', value === 'none' ? undefined : value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select mother" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {getAvailableRelatives().filter(p => p.gender === 'FEMALE').map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.firstName} {p.lastName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>Spouse</Label>
+                <Select
+                  value={watch('spouseId') || 'none'}
+                  onValueChange={(value) => setValue('spouseId', value === 'none' ? undefined : value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select spouse" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {getAvailableRelatives().map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.firstName} {p.lastName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex justify-end space-x-2 pt-4 border-t">
+            <Button type="button" variant="outline" onClick={onClose}>
+              <X className="h-4 w-4 mr-1" />
+              Cancel
+            </Button>
+            <Button 
+              type="submit" 
+              disabled={createMutation.isPending || updateMutation.isPending}
+            >
+              <Save className="h-4 w-4 mr-1" />
+              {isEditing ? 'Update' : 'Add'} Family Member
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+src/components/PersonDetail.tsx
+'use client';
+
+import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { 
+  X, 
+  Edit, 
+  Trash2, 
+  MapPin, 
+  Calendar, 
+  Users, 
+  Heart,
+  Baby,
+  UserCheck
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { toast } from 'sonner';
+import { Person } from '@/types';
+import axios from 'axios';
+
+interface PersonDetailProps {
+  person: Person;
+  onEdit: (person: Person) => void;
+  onClose: () => void;
+}
+
+export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
+  const [isDeleting, setIsDeleting] = useState(false);
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      await axios.delete(`/api/persons/${person.id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['persons'] });
+      toast.success('Family member deleted successfully');
+      onClose();
+    },
+    onError: () => {
+      toast.error('Failed to delete family member');
+      setIsDeleting(false);
+    },
+  });
+
+  const handleDelete = () => {
+    setIsDeleting(true);
+    deleteMutation.mutate();
+  };
+
+  const getInitials = (firstName: string, lastName: string) => {
+    return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+  };
+
+  const getAgeDisplay = (birthYear?: number, deathYear?: number) => {
+    if (!birthYear) return null;
+    
+    if (deathYear) {
+      const age = deathYear - birthYear;
+      return `${age} years (${birthYear}-${deathYear})`;
+    }
+    
+    const currentYear = new Date().getFullYear();
+    const age = currentYear - birthYear;
+    return `${age} years old (born ${birthYear})`;
+  };
+
+  const getAllChildren = () => {
+    const children = [
+      ...(person.fatherChildren || []),
+      ...(person.motherChildren || [])
+    ];
+    
+    // Remove duplicates based on id
+    const uniqueChildren = children.filter((child, index, arr) => 
+      arr.findIndex(c => c.id === child.id) === index
+    );
+    
+    return uniqueChildren;
+  };
+
+  const allChildren = getAllChildren();
+
+  return (
+    <div className="h-full flex flex-col bg-white">
+      {/* Header */}
+      <div className="p-4 border-b flex items-center justify-between">
+        <h2 className="font-semibold text-gray-900">Family Member Details</h2>
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+        {/* Profile Card */}
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-start space-x-4">
+              <Avatar className="h-16 w-16">
+                <AvatarFallback 
+                  style={{ backgroundColor: person.avatarColor }}
+                >
+                  <span className="text-white font-semibold text-lg">
+                    {getInitials(person.firstName, person.lastName)}
+                  </span>
+                </AvatarFallback>
+              </Avatar>
+
+              <div className="flex-1 min-w-0">
+                <h1 className="text-xl font-semibold text-gray-900">
+                  {person.firstName} {person.lastName}
+                </h1>
+                
+                <div className="flex items-center space-x-2 mt-1">
+                  <Badge variant="outline" className="capitalize">
+                    {person.gender.toLowerCase()}
+                  </Badge>
+                  {person.deathYear && (
+                    <Badge variant="secondary">Deceased</Badge>
+                  )}
+                </div>
+
+                <div className="mt-3 space-y-2 text-sm text-gray-600">
+                  {getAgeDisplay(person.birthYear, person.deathYear) && (
+                    <div className="flex items-center">
+                      <Calendar className="h-4 w-4 mr-2" />
+                      {getAgeDisplay(person.birthYear, person.deathYear)}
+                    </div>
+                  )}
+                  
+                  {person.location && (
+                    <div className="flex items-center">
+                      <MapPin className="h-4 w-4 mr-2" />
+                      {person.location}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Family Relationships */}
+        <div className="space-y-4">
+          {/* Parents */}
+          {(person.father || person.mother) && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center text-sm font-medium">
+                  <Users className="h-4 w-4 mr-2" />
+                  Parents
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {person.father && (
+                  <div className="flex items-center space-x-3">
+                    <Avatar className="h-8 w-8">
+                      <AvatarFallback className="bg-blue-500">
+                        <span className="text-white text-xs">
+                          {getInitials(person.father.firstName, person.father.lastName)}
+                        </span>
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-medium text-sm">
+                        {person.father.firstName} {person.father.lastName}
+                      </p>
+                      <p className="text-xs text-gray-500">Father</p>
+                    </div>
+                  </div>
+                )}
+                
+                {person.mother && (
+                  <div className="flex items-center space-x-3">
+                    <Avatar className="h-8 w-8">
+                      <AvatarFallback className="bg-pink-500">
+                        <span className="text-white text-xs">
+                          {getInitials(person.mother.firstName, person.mother.lastName)}
+                        </span>
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-medium text-sm">
+                        {person.mother.firstName} {person.mother.lastName}
+                      </p>
+                      <p className="text-xs text-gray-500">Mother</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Spouse */}
+          {person.spouse && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center text-sm font-medium">
+                  <Heart className="h-4 w-4 mr-2" />
+                  Spouse
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center space-x-3">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="bg-red-500">
+                      <span className="text-white text-xs">
+                        {getInitials(person.spouse.firstName, person.spouse.lastName)}
+                      </span>
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-medium text-sm">
+                      {person.spouse.firstName} {person.spouse.lastName}
+                    </p>
+                    <p className="text-xs text-gray-500">Spouse</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Children */}
+          {allChildren.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center text-sm font-medium">
+                  <Baby className="h-4 w-4 mr-2" />
+                  Children ({allChildren.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {allChildren.map((child) => (
+                  <div key={child.id} className="flex items-center space-x-3">
+                    <Avatar className="h-8 w-8">
+                      <AvatarFallback className="bg-green-500">
+                        <span className="text-white text-xs">
+                          {getInitials(child.firstName, child.lastName)}
+                        </span>
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-medium text-sm">
+                        {child.firstName} {child.lastName}
+                      </p>
+                      <p className="text-xs text-gray-500">Child</p>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Quick Stats */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center text-sm font-medium">
+              <UserCheck className="h-4 w-4 mr-2" />
+              Family Summary
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4 text-center">
+              <div className="p-3 bg-gray-50 rounded-lg">
+                <p className="text-lg font-semibold text-gray-900">
+                  {(person.father || person.mother) ? '✓' : '✗'}
+                </p>
+                <p className="text-xs text-gray-500">Has Parents</p>
+              </div>
+              
+              <div className="p-3 bg-gray-50 rounded-lg">
+                <p className="text-lg font-semibold text-gray-900">
+                  {person.spouse ? '✓' : '✗'}
+                </p>
+                <p className="text-xs text-gray-500">Married</p>
+              </div>
+              
+              <div className="p-3 bg-gray-50 rounded-lg">
+                <p className="text-lg font-semibold text-gray-900">
+                  {allChildren.length}
+                </p>
+                <p className="text-xs text-gray-500">Children</p>
+              </div>
+              
+              <div className="p-3 bg-gray-50 rounded-lg">
+                <p className="text-lg font-semibold text-gray-900">
+                  {person.deathYear ? 'No' : 'Yes'}
+                </p>
+                <p className="text-xs text-gray-500">Living</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Actions */}
+      <div className="p-4 border-t bg-gray-50">
+        <div className="flex space-x-2">
+          <Button 
+            onClick={() => onEdit(person)}
+            className="flex-1"
+          >
+            <Edit className="h-4 w-4 mr-2" />
+            Edit Details
+          </Button>
+          
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm">
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete Family Member</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Are you sure you want to delete {person.firstName} {person.lastName}? 
+                  This will remove them from the family tree and cannot be undone.
+                  All relationships with this person will also be removed.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  {isDeleting ? 'Deleting...' : 'Delete'}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </div>
+    </div>
+  );
+}
+src/app/page.tsx
+'use client';
+
+import { useState, useEffect } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from '@/components/ui/sonner';
+import { PersonsList } from '@/components/PersonsList';
+import { PersonForm } from '@/components/PersonForm';
+import { FamilyTreeView } from '@/components/FamilyTreeView';
+import { PersonDetail } from '@/components/PersonDetail';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Plus, Users, TreePine } from 'lucide-react';
+import { Person } from '@/types';
+
+const queryClient = new QueryClient();
+
+export default function Home() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <FamilyTreeApp />
+      <Toaster />
+    </QueryClientProvider>
+  );
+}
+
+function FamilyTreeApp() {
+  const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [view, setView] = useState<'list' | 'tree'>('list');
+  const [editingPerson, setEditingPerson] = useState<Person | null>(null);
+
+  const handlePersonSelect = (person: Person) => {
+    setSelectedPerson(person);
+  };
+
+  const handleEditPerson = (person: Person) => {
+    setEditingPerson(person);
+    setShowForm(true);
+  };
+
+  const handleFormClose = () => {
+    setShowForm(false);
+    setEditingPerson(null);
+  };
+
+  return (
+    <div className="h-screen flex flex-col bg-gray-50">
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200 px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <TreePine className="h-6 w-6 text-green-600" />
+            <h1 className="text-xl font-semibold">Family Tree</h1>
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            <Button
+              variant={view === 'list' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setView('list')}
+            >
+              <Users className="h-4 w-4 mr-1" />
+              List
+            </Button>
+            <Button
+              variant={view === 'tree' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setView('tree')}
+            >
+              <TreePine className="h-4 w-4 mr-1" />
+              Tree
+            </Button>
+            <Button onClick={() => setShowForm(true)}>
+              <Plus className="h-4 w-4 mr-1" />
+              Add Person
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Panel - People List */}
+        <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
+          <div className="p-4 border-b">
+            <h2 className="font-medium text-gray-900">Family Members</h2>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <PersonsList 
+              onPersonSelect={handlePersonSelect}
+              onPersonEdit={handleEditPerson}
+              selectedPersonId={selectedPerson?.id}
+            />
+          </div>
+        </div>
+
+        {/* Center Panel - Tree View or Main Content */}
+        <div className="flex-1 flex flex-col">
+          {view === 'tree' ? (
+            <FamilyTreeView 
+              onPersonSelect={handlePersonSelect}
+              selectedPersonId={selectedPerson?.id}
+            />
+          ) : (
+            <div className="flex-1 flex items-center justify-center p-8">
+              <Card className="p-8 text-center">
+                <TreePine className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  Welcome to Family Tree
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  Start by adding family members or switch to tree view to see relationships
+                </p>
+                <Button onClick={() => setShowForm(true)}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add First Person
+                </Button>
+              </Card>
+            </div>
+          )}
+        </div>
+
+        {/* Right Panel - Person Details */}
+        {selectedPerson && (
+          <div className="w-80 bg-white border-l border-gray-200">
+            <PersonDetail 
+              person={selectedPerson}
+              onEdit={handleEditPerson}
+              onClose={() => setSelectedPerson(null)}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Person Form Dialog */}
+      {showForm && (
+        <PersonForm
+          person={editingPerson}
+          onClose={handleFormClose}
+          onSuccess={() => {
+            handleFormClose();
+            // Optionally refresh the selected person if it was edited
+          }}
+        />
+      )}
+    </div>
+  );
+}
+src/app/layout.tsx
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Create Next App",
+  description: "Generated by create next app",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        {children}
+      </body>
+    </html>
+  );
+}
+
+src/lib/api.ts
+import axios from 'axios';
+import { Person, CreatePersonData } from '@/types';
+
+const api = axios.create({
+  baseURL: '/api',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+export const personApi = {
+  // Get all persons
+  getAll: async (): Promise<Person[]> => {
+    const response = await api.get('/persons');
+    return response.data;
+  },
+
+  // Get single person
+  getById: async (id: string): Promise<Person> => {
+    const response = await api.get(`/persons/${id}`);
+    return response.data;
+  },
+
+  // Create new person
+  create: async (data: CreatePersonData): Promise<Person> => {
+    const response = await api.post('/persons', data);
+    return response.data;
+  },
+
+  // Update person
+  update: async (id: string, data: Partial<CreatePersonData>): Promise<Person> => {
+    const response = await api.put(`/persons/${id}`, data);
+    return response.data;
+  },
+
+  // Delete person
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/persons/${id}`);
+  },
+
+  // Get family tree for a person
+  getFamilyTree: async (personId: string): Promise<Person[]> => {
+    const response = await api.get(`/family-tree/${personId}`);
+    return response.data;
+  },
+};
+
+export default api;
+src/lib/utils.ts
+import { clsx, type ClassValue } from "clsx"
+import { twMerge } from "tailwind-merge"
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
