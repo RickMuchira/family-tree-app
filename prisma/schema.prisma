@@ -21,6 +21,7 @@ model Person {
   dateOfDeath String?   // ISO date string
   location    String?
   avatarColor String    @default("#6B7280")
+  profilePhoto String?  // Base64 encoded image data
   
   // Direct family relationships
   fatherId    String?

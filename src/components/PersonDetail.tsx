@@ -15,10 +15,11 @@ import {
   Clock,
   CalendarDays,
   UserPlus,
-  Crown
+  Crown,
+  Camera
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
@@ -134,7 +135,6 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
         ageInfo.atDeath = deathYear - birthYear;
         
         if (birthInfo.date && deathInfo.date) {
-          // Calculate exact age
           let age = deathInfo.date.getFullYear() - birthInfo.date.getFullYear();
           if (deathInfo.date < new Date(birthInfo.date.setFullYear(deathInfo.date.getFullYear()))) {
             age--;
@@ -147,7 +147,6 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
         ageInfo.current = currentYear - birthYear;
         
         if (birthInfo.date) {
-          // Calculate exact current age
           const today = new Date();
           let age = today.getFullYear() - birthInfo.date.getFullYear();
           if (today < new Date(birthInfo.date.setFullYear(today.getFullYear()))) {
@@ -169,7 +168,6 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
       ...(person.motherChildren || [])
     ];
     
-    // Remove duplicates based on id
     const uniqueChildren = children.filter((child, index, arr) => 
       arr.findIndex(c => c.id === child.id) === index
     );
@@ -219,35 +217,56 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {/* Profile Card */}
+        {/* Enhanced Profile Card with Photo */}
         <Card>
           <CardContent className="p-6">
-            <div className="flex items-start space-x-4">
-              <Avatar className="h-16 w-16">
-                <AvatarFallback 
-                  style={{ backgroundColor: person.avatarColor }}
-                >
-                  <span className="text-white font-semibold text-lg">
-                    {getInitials(person.firstName, person.lastName)}
-                  </span>
-                </AvatarFallback>
-              </Avatar>
+            <div className="flex items-start space-x-6">
+              <div className="flex flex-col items-center space-y-3">
+                <Avatar className="h-24 w-24 border-4 border-white shadow-lg">
+                  {person.profilePhoto ? (
+                    <AvatarImage 
+                      src={person.profilePhoto} 
+                      alt={`${person.firstName} ${person.lastName}`}
+                      className="object-cover"
+                    />
+                  ) : (
+                    <AvatarFallback 
+                      style={{ backgroundColor: person.avatarColor }}
+                      className="text-2xl font-bold text-white"
+                    >
+                      {getInitials(person.firstName, person.lastName)}
+                    </AvatarFallback>
+                  )}
+                </Avatar>
+                
+                {person.profilePhoto && (
+                  <Badge variant="secondary" className="text-xs">
+                    <Camera className="h-3 w-3 mr-1" />
+                    Has Photo
+                  </Badge>
+                )}
+              </div>
 
               <div className="flex-1 min-w-0">
-                <h1 className="text-xl font-semibold text-gray-900">
+                <h1 className="text-2xl font-bold text-gray-900">
                   {person.firstName} {person.lastName}
                 </h1>
                 
-                <div className="flex items-center space-x-2 mt-1">
+                <div className="flex items-center space-x-2 mt-2">
                   <Badge variant="outline" className="capitalize">
                     {person.gender.toLowerCase()}
                   </Badge>
                   {isDeceased && (
                     <Badge variant="secondary">Deceased</Badge>
                   )}
+                  {person.profilePhoto && (
+                    <Badge variant="outline" className="text-green-600">
+                      📷 Photo
+                    </Badge>
+                  )}
                 </div>
 
-                <div className="mt-3 space-y-2 text-sm text-gray-600">
+                <div className="mt-4 space-y-2 text-sm text-gray-600">
                   {ageInfo.display && (
                     <div className="flex items-center">
                       <Clock className="h-4 w-4 mr-2" />
@@ -340,9 +359,9 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
               <CardContent className="space-y-3">
                 {person.father && (
                   <div className="flex items-center space-x-3">
-                    <Avatar className="h-8 w-8">
+                    <Avatar className="h-10 w-10">
                       <AvatarFallback className="bg-blue-500">
-                        <span className="text-white text-xs">
+                        <span className="text-white text-sm font-medium">
                           {getInitials(person.father.firstName, person.father.lastName)}
                         </span>
                       </AvatarFallback>
@@ -358,9 +377,9 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
                 
                 {person.mother && (
                   <div className="flex items-center space-x-3">
-                    <Avatar className="h-8 w-8">
+                    <Avatar className="h-10 w-10">
                       <AvatarFallback className="bg-pink-500">
-                        <span className="text-white text-xs">
+                        <span className="text-white text-sm font-medium">
                           {getInitials(person.mother.firstName, person.mother.lastName)}
                         </span>
                       </AvatarFallback>
@@ -388,9 +407,9 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
               </CardHeader>
               <CardContent>
                 <div className="flex items-center space-x-3">
-                  <Avatar className="h-8 w-8">
+                  <Avatar className="h-10 w-10">
                     <AvatarFallback className="bg-red-500">
-                      <span className="text-white text-xs">
+                      <span className="text-white text-sm font-medium">
                         {getInitials(person.spouse.firstName, person.spouse.lastName)}
                       </span>
                     </AvatarFallback>
@@ -470,16 +489,24 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
                         {categoryRelationships.map((relationship) => (
                           <div key={relationship.id} className="flex items-center space-x-3">
                             <Avatar className="h-8 w-8">
-                              <AvatarFallback 
-                                style={{ backgroundColor: relationship.displayInfo.person?.avatarColor }}
-                              >
-                                <span className="text-white text-xs">
-                                  {relationship.displayInfo.person ? 
-                                    getInitials(relationship.displayInfo.person.firstName, relationship.displayInfo.person.lastName) : 
-                                    '?'
-                                  }
-                                </span>
-                              </AvatarFallback>
+                              {relationship.displayInfo.person?.profilePhoto ? (
+                                <AvatarImage 
+                                  src={relationship.displayInfo.person.profilePhoto}
+                                  alt={`${relationship.displayInfo.person.firstName} ${relationship.displayInfo.person.lastName}`}
+                                  className="object-cover"
+                                />
+                              ) : (
+                                <AvatarFallback 
+                                  style={{ backgroundColor: relationship.displayInfo.person?.avatarColor }}
+                                >
+                                  <span className="text-white text-xs">
+                                    {relationship.displayInfo.person ? 
+                                      getInitials(relationship.displayInfo.person.firstName, relationship.displayInfo.person.lastName) : 
+                                      '?'
+                                    }
+                                  </span>
+                                </AvatarFallback>
+                              )}
                             </Avatar>
                             <div>
                               <p className="font-medium text-sm">
@@ -561,12 +588,12 @@ export function PersonDetail({ person, onEdit, onClose }: PersonDetailProps) {
               
               <div className="p-3 bg-gray-50 rounded-lg text-center">
                 <div className="flex items-center justify-center mb-1">
-                  <Crown className="h-4 w-4 text-gray-600" />
+                  <Camera className="h-4 w-4 text-gray-600" />
                 </div>
                 <p className="text-sm font-medium text-gray-900">
-                  {relationships.length}
+                  {person.profilePhoto ? 'Yes' : 'No'}
                 </p>
-                <p className="text-xs text-gray-500">Extended</p>
+                <p className="text-xs text-gray-500">Has Photo</p>
               </div>
             </div>
             

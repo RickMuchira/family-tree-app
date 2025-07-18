@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
-import { X, Save, User, Calendar, Heart, Users, Baby, UserPlus, Crown } from 'lucide-react';
+import { X, Save, User, Calendar, Heart, Users, Baby, UserPlus, Crown, Camera, Upload, Trash2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Card } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -35,11 +35,12 @@ const personSchema = z.object({
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
   gender: z.enum(['MALE', 'FEMALE', 'UNKNOWN']).default('UNKNOWN'),
-  birthYear: z.union([z.number().min(1900).max(new Date().getFullYear()), z.nan()]).optional().transform(val => isNaN(val as number) ? undefined : val),
-  deathYear: z.union([z.number().min(1900).max(new Date().getFullYear()), z.nan()]).optional().transform(val => isNaN(val as number) ? undefined : val),
+  birthYear: z.union([z.number().min(1).max(new Date().getFullYear()), z.nan()]).optional().transform(val => isNaN(val as number) ? undefined : val),
+  deathYear: z.union([z.number().min(1).max(new Date().getFullYear()), z.nan()]).optional().transform(val => isNaN(val as number) ? undefined : val),
   dateOfBirth: z.string().optional(),
   dateOfDeath: z.string().optional(),
   location: z.string().optional(),
+  profilePhoto: z.string().optional(), // Base64 encoded image
   relationshipType: z.enum([
     'none', 'child', 'spouse', 'parent',
     'SIBLING', 'HALF_SIBLING', 'STEP_SIBLING',
@@ -110,6 +111,10 @@ interface PersonFormProps {
 export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
   const queryClient = useQueryClient();
   const isEditing = Boolean(person);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(
+    person?.profilePhoto || null
+  );
 
   const { data: allPersons = [] } = useQuery({
     queryKey: ['persons'],
@@ -136,6 +141,7 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
       dateOfBirth: person.dateOfBirth || undefined,
       dateOfDeath: person.dateOfDeath || undefined,
       location: person.location || undefined,
+      profilePhoto: person.profilePhoto || undefined,
       relationshipType: 'none',
       relatedPersonId: undefined,
     } : {
@@ -150,8 +156,41 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
   const watchedRelationshipType = watch('relationshipType');
   const watchedRelatedPersonId = watch('relatedPersonId');
 
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image size must be less than 5MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      setPreviewImage(result);
+      setValue('profilePhoto', result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveImage = () => {
+    setPreviewImage(null);
+    setValue('profilePhoto', undefined);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const createMutation = useMutation({
-    mutationFn: async (data: CreatePersonData & { relationshipType?: string; relatedPersonId?: string }) => {
+    mutationFn: async (data: CreatePersonData & { relationshipType?: string; relatedPersonId?: string; profilePhoto?: string }) => {
       // Create the person first
       const { relationshipType, relatedPersonId, ...personData } = data;
       const response = await axios.post('/api/persons', personData);
@@ -175,7 +214,7 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async (data: CreatePersonData) => {
+    mutationFn: async (data: CreatePersonData & { profilePhoto?: string }) => {
       const { relationshipType, relatedPersonId, ...personData } = data as any;
       const response = await axios.put(`/api/persons/${person!.id}`, personData);
       return response.data;
@@ -242,7 +281,7 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
   };
 
   const onSubmit = (data: PersonFormData) => {
-    const submitData: CreatePersonData & { relationshipType?: string; relatedPersonId?: string } = {
+    const submitData: CreatePersonData & { relationshipType?: string; relatedPersonId?: string; profilePhoto?: string } = {
       firstName: data.firstName,
       lastName: data.lastName,
       gender: data.gender,
@@ -251,6 +290,7 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
       dateOfBirth: data.dateOfBirth || undefined,
       dateOfDeath: data.dateOfDeath || undefined,
       location: data.location || undefined,
+      profilePhoto: data.profilePhoto || undefined,
       relationshipType: data.relationshipType,
       relatedPersonId: data.relatedPersonId,
     };
@@ -321,7 +361,7 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
             <User className="h-5 w-5" />
@@ -330,27 +370,71 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          {/* Preview */}
-          <Card className="p-4 bg-gradient-to-r from-blue-50 to-purple-50">
-            <div className="flex items-center space-x-4">
-              <Avatar className="h-16 w-16">
-                <AvatarFallback 
-                  style={{ backgroundColor: getGenderColor(watchedGender) }}
-                >
-                  <span className="text-white font-medium text-lg">
-                    {getInitials(watchedFirstName, watchedLastName)}
-                  </span>
-                </AvatarFallback>
-              </Avatar>
+          {/* Enhanced Preview with Photo */}
+          <Card className="p-6 bg-gradient-to-r from-blue-50 to-purple-50">
+            <div className="flex items-center space-x-6">
+              {/* Profile Photo Section */}
+              <div className="flex flex-col items-center space-y-3">
+                <Avatar className="h-24 w-24 border-4 border-white shadow-lg">
+                  {previewImage ? (
+                    <AvatarImage src={previewImage} alt="Profile" className="object-cover" />
+                  ) : (
+                    <AvatarFallback 
+                      style={{ backgroundColor: getGenderColor(watchedGender) }}
+                      className="text-2xl font-bold text-white"
+                    >
+                      {getInitials(watchedFirstName, watchedLastName)}
+                    </AvatarFallback>
+                  )}
+                </Avatar>
+                
+                <div className="flex space-x-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Camera className="h-4 w-4 mr-1" />
+                    {previewImage ? 'Change' : 'Add Photo'}
+                  </Button>
+                  
+                  {previewImage && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRemoveImage}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+                
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  className="hidden"
+                />
+              </div>
+
+              {/* Person Info */}
               <div className="flex-1">
-                <h3 className="text-lg font-semibold">
+                <h3 className="text-2xl font-bold text-gray-900">
                   {watchedFirstName || 'First'} {watchedLastName || 'Last'}
                 </h3>
-                <p className="text-sm text-gray-600 capitalize">
-                  {watchedGender.toLowerCase()}
-                </p>
+                <div className="flex items-center space-x-2 mt-2">
+                  <Badge variant="outline" className="capitalize">
+                    {watchedGender.toLowerCase()}
+                  </Badge>
+                  {previewImage && (
+                    <Badge variant="secondary">Has Photo</Badge>
+                  )}
+                </div>
                 {getRelationshipDescription() && (
-                  <p className="text-sm text-blue-600 mt-1">
+                  <p className="text-sm text-blue-600 mt-3 bg-blue-50 p-2 rounded">
                     {getRelationshipDescription()}
                   </p>
                 )}
@@ -425,7 +509,7 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
 
           <Separator />
 
-          {/* Dates Section - Updated to remove year fields */}
+          {/* Enhanced Dates Section with Extended Range */}
           <div className="space-y-4">
             <h3 className="text-lg font-medium flex items-center">
               <Calendar className="h-5 w-5 mr-2" />
@@ -438,17 +522,22 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
                 <h4 className="font-medium text-green-700">Birth Information</h4>
                 <div className="space-y-2">
                   <div>
-                    <Label htmlFor="birthYear">Birth Year *</Label>
+                    <Label htmlFor="birthYear">Birth Year</Label>
                     <Input
                       id="birthYear"
                       type="number"
+                      min="1"
+                      max={new Date().getFullYear()}
                       {...register('birthYear', { 
                         valueAsNumber: true,
                         setValueAs: (value) => value === '' ? undefined : Number(value)
                       })}
-                      placeholder="e.g. 1990"
+                      placeholder="e.g. 1990 or 1850"
                       className="mt-1"
                     />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Any year from 1 AD to present
+                    </p>
                     {errors.birthYear && (
                       <p className="text-sm text-red-600 mt-1">{errors.birthYear.message}</p>
                     )}
@@ -480,6 +569,8 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
                     <Input
                       id="deathYear"
                       type="number"
+                      min="1"
+                      max={new Date().getFullYear()}
                       {...register('deathYear', { 
                         valueAsNumber: true,
                         setValueAs: (value) => value === '' ? undefined : Number(value)
@@ -487,6 +578,9 @@ export function PersonForm({ person, onClose, onSuccess }: PersonFormProps) {
                       placeholder="Leave empty if alive"
                       className="mt-1"
                     />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Any year from 1 AD to present
+                    </p>
                     {errors.deathYear && (
                       <p className="text-sm text-red-600 mt-1">{errors.deathYear.message}</p>
                     )}

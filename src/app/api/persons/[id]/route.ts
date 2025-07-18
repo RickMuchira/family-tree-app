@@ -8,11 +8,12 @@ const UpdatePersonSchema = z.object({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   gender: z.enum(['MALE', 'FEMALE', 'UNKNOWN']).optional(),
-  birthYear: z.number().min(1900).max(new Date().getFullYear()).optional(),
-  deathYear: z.number().min(1900).max(new Date().getFullYear()).optional(),
+  birthYear: z.number().min(1).max(new Date().getFullYear()).optional(),
+  deathYear: z.number().min(1).max(new Date().getFullYear()).optional(),
   dateOfBirth: z.string().optional(),
   dateOfDeath: z.string().optional(),
   location: z.string().optional(),
+  profilePhoto: z.string().optional(), // Base64 encoded image
   fatherId: z.string().optional(),
   motherId: z.string().optional(),
   spouseId: z.string().optional(),
@@ -61,14 +62,38 @@ const UpdatePersonSchema = z.object({
     message: 'Date of death must be equal to or after birth year',
     path: ['dateOfDeath'],
   }
+).refine(
+  (data) => {
+    // Validate profile photo if provided (basic base64 validation)
+    if (data.profilePhoto !== undefined) {
+      if (data.profilePhoto === null || data.profilePhoto === '') {
+        return true; // Allow removal of photo
+      }
+      const base64Regex = /^data:image\/(jpeg|jpg|png|gif|webp);base64,/;
+      if (!base64Regex.test(data.profilePhoto)) {
+        return false;
+      }
+      // Check size (approximate - base64 is ~33% larger than original)
+      const sizeInBytes = (data.profilePhoto.length * 3) / 4;
+      if (sizeInBytes > 5 * 1024 * 1024) { // 5MB limit
+        return false;
+      }
+    }
+    return true;
+  },
+  {
+    message: 'Profile photo must be a valid base64 image under 5MB',
+    path: ['profilePhoto'],
+  }
 );
 
 // GET single person
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
   try {
+    const params = await props.params;
     const person = await prisma.person.findUnique({
       where: { id: params.id },
       include: {
@@ -94,9 +119,10 @@ export async function GET(
 // PUT update person
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
   try {
+    const params = await props.params;
     const body = await request.json();
     const validatedData = UpdatePersonSchema.parse(body);
     
@@ -105,6 +131,11 @@ export async function PUT(
     if (validatedData.gender) {
       updateData.avatarColor = validatedData.gender === 'MALE' ? '#3B82F6' : 
                               validatedData.gender === 'FEMALE' ? '#EC4899' : '#6B7280';
+    }
+    
+    // Handle profile photo removal
+    if (validatedData.profilePhoto === null || validatedData.profilePhoto === '') {
+      updateData.profilePhoto = null;
     }
     
     const person = await prisma.person.update({
@@ -130,9 +161,10 @@ export async function PUT(
 // DELETE person
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
   try {
+    const params = await props.params;
     // First, remove relationships pointing to this person
     await prisma.person.updateMany({
       where: { 

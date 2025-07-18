@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Search, Edit, Trash2, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card } from '@/components/ui/card';
@@ -115,15 +115,23 @@ export function PersonsList({ onPersonSelect, onPersonEdit, selectedPersonId }: 
                   onClick={() => onPersonSelect(person)}
                 >
                   <div className="flex items-center space-x-3">
-                    <Avatar className="h-10 w-10">
-                      <AvatarFallback 
-                        className={getGenderColor(person.gender)}
-                        style={{ backgroundColor: person.avatarColor }}
-                      >
-                        <span className="text-white font-medium">
-                          {getInitials(person.firstName, person.lastName)}
-                        </span>
-                      </AvatarFallback>
+                    <Avatar className="h-12 w-12">
+                      {person.profilePhoto ? (
+                        <AvatarImage 
+                          src={person.profilePhoto} 
+                          alt={`${person.firstName} ${person.lastName}`}
+                          className="object-cover"
+                        />
+                      ) : (
+                        <AvatarFallback 
+                          className={getGenderColor(person.gender)}
+                          style={{ backgroundColor: person.avatarColor }}
+                        >
+                          <span className="text-white font-medium">
+                            {getInitials(person.firstName, person.lastName)}
+                          </span>
+                        </AvatarFallback>
+                      )}
                     </Avatar>
 
                     <div className="flex-1 min-w-0">
@@ -134,6 +142,11 @@ export function PersonsList({ onPersonSelect, onPersonEdit, selectedPersonId }: 
                         <Badge variant="outline" className="text-xs">
                           {person.gender.toLowerCase()}
                         </Badge>
+                        {person.profilePhoto && (
+                          <Badge variant="secondary" className="text-xs">
+                            📷
+                          </Badge>
+                        )}
                       </div>
                       
                       <div className="text-sm text-gray-500 space-y-1">
